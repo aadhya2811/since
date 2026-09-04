@@ -6,3 +6,4 @@ pydantic[email]>=2.7
 pydantic-settings>=2.3
 pytest>=8
 pytest-asyncio>=0.23
+psycopg[binary]>=3.1   # only used when SINCE_DATABASE_URL is postgresql://

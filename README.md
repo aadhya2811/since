@@ -84,6 +84,15 @@ cd frontend && npm install && npm run dev      # → http://localhost:5173
 cd backend && python -m pytest -q
 ```
 
+### Windows (PowerShell)
+
+```powershell
+cd backend; pip install -r requirements.txt
+cd ..\frontend; npm install; npm run build; cd ..\backend
+.\run.ps1            # real data → http://localhost:8000
+.\run.ps1 -Demo      # offline demo with scripted events
+```
+
 ### Fully offline demo
 
 ```bash
@@ -223,7 +232,7 @@ Every stored quote has two timestamps: `as_of` (the exchange time of the print) 
 
 ### 5.7 Why these technologies
 
-- **FastAPI + SQLAlchemy + SQLite (WAL).** One process, one file, zero setup for a reviewer; `SINCE_DATABASE_URL=postgresql://…` is the only change for Postgres. SQLAlchemy 2.0 typed models keep the schema readable.
+- **FastAPI + SQLAlchemy + SQLite (WAL).** One process, one file, zero setup for a reviewer; `SINCE_DATABASE_URL=postgresql+psycopg://…` is the only change for Postgres (driver included). Requires Python 3.10+. SQLAlchemy 2.0 typed models keep the schema readable.
 - **React + Vite + TypeScript, no UI framework.** ~900 lines of components, hand-written CSS. A component library would have cost more in bundle size and fighting defaults than it saved.
 - **Yahoo Finance v8 chart endpoint.** Keyless, covers NSE/BSE, one endpoint for quotes and history (the v7 quote endpoint now needs a cookie+crumb dance that breaks unpredictably — one endpoint, one failure mode).
 - **Google News RSS.** Keyless, good Indian business-press coverage, gives publisher and timestamp.

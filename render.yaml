@@ -17,7 +17,6 @@ services:
         value: "true"
       - key: SINCE_DATABASE_URL
         value: sqlite:////data/since.db
-    disk:
-      name: since-data
-      mountPath: /data
-      sizeGB: 1
+    # Free tier has no persistent disk: state resets on redeploy, which is fine
+    # for a demo. For durability, add a disk (paid) or point
+    # SINCE_DATABASE_URL at a Postgres URL (Render offers a free one).
