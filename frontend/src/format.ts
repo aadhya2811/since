@@ -1,8 +1,11 @@
 export const inr = (x: number | null | undefined, digits?: number) =>
   x == null ? '—' : '₹' + x.toLocaleString('en-IN', { minimumFractionDigits: digits ?? (x >= 1000 ? 0 : 2), maximumFractionDigits: digits ?? (x >= 1000 ? 0 : 2) })
 
-export const pct = (x: number | null | undefined, signed = true) =>
-  x == null ? '—' : (signed && x > 0 ? '+' : '') + (x * 100).toFixed(1) + '%'
+export const pct = (x: number | null | undefined, signed = true) => {
+  if (x == null) return '—'
+  if (Math.abs(x) < 0.0005) return '0.0%'
+  return (signed && x > 0 ? '+' : '') + (x * 100).toFixed(1) + '%'
+}
 
 export const compact = (n: number | null | undefined) => {
   if (n == null) return '—'

@@ -35,7 +35,8 @@ UNIVERSE: list[SymbolInfo] = [
     SymbolInfo("BAJFINANCE.NS", "Bajaj Finance", "NBFC", 920, 0.29),
     SymbolInfo("MARUTI.NS", "Maruti Suzuki", "Auto", 12900, 0.21),
     SymbolInfo("SUNPHARMA.NS", "Sun Pharma", "Pharma", 1650, 0.20),
-    SymbolInfo("TATAMOTORS.NS", "Tata Motors", "Auto", 690, 0.34),
+    SymbolInfo("TMPV.NS", "Tata Motors Passenger Vehicles", "Auto", 690, 0.34),
+    SymbolInfo("TMCV.NS", "Tata Motors Commercial Vehicles", "Auto", 330, 0.30),
     SymbolInfo("M&M.NS", "Mahindra & Mahindra", "Auto", 3320, 0.25),
     SymbolInfo("HCLTECH.NS", "HCL Technologies", "IT", 1470, 0.24),
     SymbolInfo("WIPRO.NS", "Wipro", "IT", 250, 0.26),
@@ -69,7 +70,7 @@ UNIVERSE: list[SymbolInfo] = [
     SymbolInfo("TATACONSUM.NS", "Tata Consumer Products", "FMCG", 1090, 0.23),
     SymbolInfo("BRITANNIA.NS", "Britannia Industries", "FMCG", 5800, 0.18),
     SymbolInfo("TRENT.NS", "Trent", "Retail", 5400, 0.36),
-    SymbolInfo("ZOMATO.NS", "Eternal (Zomato)", "Internet", 290, 0.42),
+    SymbolInfo("ETERNAL.NS", "Eternal (Zomato, Blinkit)", "Internet", 290, 0.42),
     SymbolInfo("PAYTM.NS", "One97 Communications (Paytm)", "Fintech", 1150, 0.48),
     SymbolInfo("NYKAA.NS", "FSN E-Commerce (Nykaa)", "Internet", 215, 0.40),
     SymbolInfo("IRCTC.NS", "IRCTC", "Travel", 760, 0.30),
@@ -86,14 +87,28 @@ UNIVERSE: list[SymbolInfo] = [
 
 BY_SYMBOL: dict[str, SymbolInfo] = {s.symbol: s for s in UNIVERSE}
 
+# Old names people still type. Zomato renamed to Eternal (2025); Tata Motors
+# demerged into passenger (TMPV) and commercial (TMCV) vehicles (Oct 2025).
+ALIASES: dict[str, str] = {
+    "ZOMATO": "ETERNAL.NS",
+    "ZOMATO.NS": "ETERNAL.NS",
+    "TATAMOTORS": "TMPV.NS",
+    "TATAMOTORS.NS": "TMPV.NS",
+}
+
 
 def search(q: str, limit: int = 8) -> list[SymbolInfo]:
     q = q.strip().upper()
     if not q:
         return UNIVERSE[:limit]
+    alias_hits = [BY_SYMBOL[v] for k, v in ALIASES.items() if k.startswith(q) and v in BY_SYMBOL]
     starts = [s for s in UNIVERSE if s.symbol.startswith(q) or s.name.upper().startswith(q)]
     contains = [s for s in UNIVERSE if s not in starts and (q in s.symbol or q in s.name.upper())]
-    return (starts + contains)[:limit]
+    out: list[SymbolInfo] = []
+    for s in starts + alias_hits + contains:
+        if s not in out:
+            out.append(s)
+    return out[:limit]
 
 
 def normalise(symbol: str) -> str:
@@ -101,6 +116,8 @@ def normalise(symbol: str) -> str:
     s = symbol.strip().upper()
     if not s:
         return s
+    if s in ALIASES:
+        return ALIASES[s]
     if s.startswith("^") or "." in s:
         return s
     return f"{s}.NS"

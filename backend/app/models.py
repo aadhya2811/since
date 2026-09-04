@@ -144,6 +144,11 @@ class SymbolMeta(Base):
     currency: Mapped[str] = mapped_column(String(8), default="INR")
     bars_refreshed_at: Mapped[datetime | None] = mapped_column(DateTime)
     news_refreshed_at: Mapped[datetime | None] = mapped_column(DateTime)
+    # A ticker the feed does not know (delisted, renamed, typo). We stop
+    # polling it and tell the user, instead of showing "waiting…" forever.
+    unavailable: Mapped[bool] = mapped_column(Boolean, default=False)
+    unavailable_reason: Mapped[str | None] = mapped_column(String(120))
+    miss_count: Mapped[int] = mapped_column(Integer, default=0)
 
 
 class Quote(Base):
@@ -161,6 +166,7 @@ class Quote(Base):
     as_of: Mapped[datetime] = mapped_column(DateTime)      # exchange timestamp of the print
     fetched_at: Mapped[datetime] = mapped_column(DateTime)  # when we received it
     source: Mapped[str] = mapped_column(String(24))
+    delay_minutes: Mapped[int | None] = mapped_column(Integer)  # vendor-declared lag
 
 
 class DailyBar(Base):

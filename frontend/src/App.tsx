@@ -1,9 +1,10 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { ApiError, ConflictError, api, auth, newVisit } from './api'
+import { ApiError, ConflictError, api, auth, newVisit, visitId } from './api'
 import type { Briefing, BriefingItem, SessionOut, User, Watchlist } from './types'
 import { Login } from './components/Login'
 import { AddSymbol } from './components/AddSymbol'
 import { QuietRow, StockCard } from './components/StockCard'
+import { WhatsNew } from './components/WhatsNew'
 import { dateTimeIST, timeIST } from './format'
 
 const POLL_MS = 30_000
@@ -38,6 +39,9 @@ function Main({ user, onLogout }: { user: User; onLogout: () => void }) {
   const [showQuiet, setShowQuiet] = useState(false)
   const [sessions, setSessions] = useState<SessionOut[]>([])
   const [error, setError] = useState<string | null>(null)
+  const [modal, setModal] = useState<Briefing | null>(null)
+  const [busy, setBusy] = useState(false)
+  const shownFor = useRef<string | null>(null)   // visit id the popup was already shown for
   const { toast, show } = useToast()
 
   const active = useMemo(() => lists?.find(l => l.id === activeId) ?? null, [lists, activeId])
@@ -56,6 +60,12 @@ function Main({ user, onLogout }: { user: User; onLogout: () => void }) {
     try {
       const b = await api.briefing(id)
       setBriefing(b); setError(null)
+      // The popup: once per visit, the moment the briefing lands.
+      const key = `${visitId()}:${id}`
+      if ((b.new_visit || b.first_visit) && b.items.length > 0 && shownFor.current !== key) {
+        shownFor.current = key
+        setModal(b)
+      }
       // The briefing carries the watchlist version — keep the tabs in sync if another device changed it.
       setLists(ls => ls && ls.map(l => (l.id === id && l.version !== b.watchlist_version ? { ...l, version: b.watchlist_version } : l)))
     } catch (e) {
@@ -101,15 +111,17 @@ function Main({ user, onLogout }: { user: User; onLogout: () => void }) {
   }
   async function rewind(sessions: number) {
     if (!active) return
+    setModal(null)
     await api.rewind(active.id, sessions)
-    show(sessions === 0 ? 'Baseline set to the last close.' : `Pretending you last looked ${sessions} session${sessions === 1 ? '' : 's'} ago.`)
-    await refresh(active.id, true)
+    const b = await api.briefing(active.id)
+    setBriefing(b)
+    setModal(b)   // the demo moment: show the briefing popup for the rewound baseline
   }
   async function simulateReturn() {
     if (!active) return
     newVisit()
+    shownFor.current = null
     await refresh(active.id, true)
-    show('New visit started: whatever you saw last is now the baseline.')
   }
 
   const items = briefing?.items ?? []
@@ -141,7 +153,7 @@ function Main({ user, onLogout }: { user: User; onLogout: () => void }) {
           <span><i className={`dot ${briefing.market.is_open ? 'open' : 'closed'}`} />NSE {briefing.market.is_open ? 'open' : briefing.market.phase === 'pre' ? 'pre-open' : 'closed'}
             {!briefing.market.is_open && <span className="faint"> · last close {dateTimeIST(briefing.market.last_close)} · opens {dateTimeIST(briefing.market.next_open)} IST</span>}
           </span>
-          <span><i className={`dot ${briefing.data.degraded ? 'warn' : ''}`} />feed: {briefing.data.active_provider}{briefing.data.active_provider === 'yahoo' ? ' (~15 min delayed)' : ''}</span>
+          <span><i className={`dot ${briefing.data.degraded ? 'warn' : ''}`} />feed: {briefing.data.active_provider}{(() => { const d = items.find(i => i.quote)?.quote?.freshness.delay_minutes; return d ? ` · ${d} min delayed` : d === 0 ? ' · real-time' : '' })()}</span>
           <span className="faint">updated {timeIST(briefing.generated_at)} IST · refreshes every 30s</span>
           {sessions.length > 1 && <span className="sessions">devices: {sessions.map(s => <span key={s.id} className={s.current ? 'cur' : ''}>{s.device_label}</span>)}</span>}
         </div>
@@ -161,8 +173,11 @@ function Main({ user, onLogout }: { user: User; onLogout: () => void }) {
         <div className="empty">
           <h3>No watchlist yet</h3>
           <p>Start with a sample of 12 NSE stocks (with a few days of history so you can see the briefing work), or build your own.</p>
-          <button className="btn primary" onClick={async () => { const wl = await api.createSample(); await loadLists(); setActiveId(wl.id) }}>Create sample watchlist</button>{' '}
-          <button className="btn" onClick={async () => { const wl = await api.createWatchlist('My watchlist'); await loadLists(); setActiveId(wl.id) }}>Start empty</button>
+          <button className="btn primary" disabled={busy} onClick={async () => {
+            setBusy(true)
+            try { const wl = await api.createSample(); await loadLists(); setActiveId(wl.id) } catch (e) { show((e as Error).message, true) } finally { setBusy(false) }
+          }}>{busy ? 'Fetching prices & history…' : 'Create sample watchlist'}</button>{' '}
+          <button className="btn" disabled={busy} onClick={async () => { const wl = await api.createWatchlist('My watchlist'); await loadLists(); setActiveId(wl.id) }}>Start empty</button>
         </div>
       )}
 
@@ -170,7 +185,11 @@ function Main({ user, onLogout }: { user: User; onLogout: () => void }) {
         <>
           <div className="headline">
             <h2>{briefing ? briefing.summary.headline : loading ? 'Reading the market…' : ''}</h2>
-            {briefing && briefing.new_visit && items.length > 0 && <div className="sub">Welcome back. Changes below are measured from what <b>you</b> last saw, not from yesterday's close.</div>}
+            {briefing && items.length > 0 && (
+              briefing.first_visit
+                ? <div className="sub">First look — baseline set to now. Come back later, or use <b>Try it</b> below to rewind.</div>
+                : briefing.new_visit && <div className="sub">Welcome back. Changes are measured from what <b>you</b> last saw, not from yesterday's close.</div>
+            )}
           </div>
 
           <div style={{ marginTop: 14 }}><AddSymbol onAdd={addSymbol} existing={existing} /></div>
@@ -205,7 +224,7 @@ function Main({ user, onLogout }: { user: User; onLogout: () => void }) {
 
           {briefing && items.length > 0 && (
             <div className="demo">
-              <span className="grow"><b>Try it:</b> the briefing diffs against what <em>you</em> last saw. Pretend you last checked…</span>
+              <span className="grow"><b>Try it</b> — the briefing diffs against what <em>you</em> last saw. Pretend you last checked…</span>
               {[1, 3, 5, 10].map(n => <button key={n} className="btn sm" onClick={() => rewind(n)}>{n} session{n === 1 ? '' : 's'} ago</button>)}
               <button className="btn sm" onClick={() => rewind(0)}>at last close</button>
               <span className="faint">·</span>
@@ -215,6 +234,11 @@ function Main({ user, onLogout }: { user: User; onLogout: () => void }) {
         </>
       )}
 
+      {modal && (
+        <WhatsNew briefing={modal} onClose={() => setModal(null)}
+                  onMarkAllSeen={async () => { setModal(null); await ack(null) }}
+                  onRewind={rewind} />
+      )}
       {toast && <div className={`toast ${toast.warn ? 'warn' : ''}`}>{toast.text}</div>}
     </div>
   )

@@ -110,7 +110,7 @@ class GoogleNewsProvider(NewsProvider):
 
 # (sessions_ago, hour_ist, minute_ist, title, source) — timed to the price events in simulated.py
 _SCRIPTED: dict[str, list[tuple[int, int, int, str, str]]] = {
-    "TATAMOTORS.NS": [
+    "TMPV.NS": [
         (0, 9, 32, "Tata Motors slides as JLR flags softer demand in Europe, trims FY guidance", "Economic Times"),
         (0, 11, 5, "Brokerages cut Tata Motors targets after JLR commentary; stock down 5%", "Moneycontrol"),
         (4, 15, 50, "Tata Motors to invest ₹15,000 crore in EV capacity by 2028", "Business Standard"),
@@ -127,7 +127,7 @@ _SCRIPTED: dict[str, list[tuple[int, int, int, str, str]]] = {
     "BAJFINANCE.NS": [
         (0, 9, 15, "Bajaj Finance jumps on strong Q2 update: AUM up 27%, new loans up 18%", "CNBC-TV18"),
     ],
-    "ZOMATO.NS": [
+    "ETERNAL.NS": [
         (3, 10, 0, "Eternal shares surge on Blinkit's first profitable quarter", "Economic Times"),
         (0, 9, 40, "Eternal slips as Swiggy announces quick-commerce price war", "Mint"),
     ],

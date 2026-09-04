@@ -4,6 +4,8 @@ Behaviour
 * Each provider has its own breaker. After N consecutive failures it opens
   and is skipped for `reset_seconds`; then one trial call is allowed
   (half-open). Success closes it.
+* A `SymbolNotFound` propagates immediately: it says nothing about the
+  provider's health and must never be answered with fallback data.
 * `get_quotes` walks the chain and returns the first provider's result. If
   every provider fails, ProviderError propagates — the *store* keeps serving
   the last good snapshot, marked stale. Users see old data labelled old,
@@ -17,7 +19,7 @@ import logging
 import time
 from dataclasses import dataclass, field
 
-from .provider import BarData, MarketDataProvider, ProviderError, QuoteData
+from .provider import BarData, MarketDataProvider, ProviderError, QuoteData, SymbolNotFound
 
 log = logging.getLogger(__name__)
 
@@ -72,6 +74,11 @@ class ResilientProvider(MarketDataProvider):
                 continue
             try:
                 result = await getattr(p, fn_name)(*args)
+            except SymbolNotFound:
+                # The provider is healthy; the *symbol* is wrong. Falling back
+                # would hand the caller made-up data for a real ticker, and
+                # counting it as a failure would trip the breaker on typos.
+                raise
             except ProviderError as e:
                 br.record_failure(e)
                 last_err = e

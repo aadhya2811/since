@@ -64,3 +64,26 @@ def init_db() -> None:
     from . import models  # noqa: F401  (register tables)
 
     Base.metadata.create_all(engine)
+    _add_missing_columns()
+
+
+def _add_missing_columns() -> None:
+    """Poor man's migration: add columns that exist in the models but not in
+    an older database file. Enough for additive schema changes; anything
+    destructive would get Alembic."""
+    from sqlalchemy import inspect, text
+
+    insp = inspect(engine)
+    with engine.begin() as conn:
+        for table in Base.metadata.sorted_tables:
+            if not insp.has_table(table.name):
+                continue
+            have = {c["name"] for c in insp.get_columns(table.name)}
+            for col in table.columns:
+                if col.name in have:
+                    continue
+                ddl = f'ALTER TABLE {table.name} ADD COLUMN {col.name} {col.type.compile(engine.dialect)}'
+                if col.default is not None and not callable(col.default.arg):
+                    v = col.default.arg
+                    ddl += f" DEFAULT {int(v) if isinstance(v, bool) else repr(v)}"
+                conn.execute(text(ddl))

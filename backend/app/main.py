@@ -16,6 +16,8 @@ from .market.service import MarketService, build_news_chain, build_provider
 from .routers import auth, briefing, misc, watchlists
 
 logging.basicConfig(level=settings.log_level, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
+logging.getLogger("httpx").setLevel(logging.WARNING)   # one line per request is noise, not signal
+logging.getLogger("httpcore").setLevel(logging.WARNING)
 
 
 def create_app(market: MarketService | None = None) -> FastAPI:
@@ -25,6 +27,10 @@ def create_app(market: MarketService | None = None) -> FastAPI:
         svc = market or MarketService(build_provider(settings), settings, build_news_chain(settings))
         app.state.market = svc
         svc.start()
+        logging.getLogger("since").info(
+            "Since is up · prices: %s (fallback: %s) · news: %s · db: %s",
+            settings.provider, settings.fallback_provider or "none", settings.news_provider or "off", settings.database_url,
+        )
         try:
             yield
         finally:

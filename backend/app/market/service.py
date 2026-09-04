@@ -25,16 +25,18 @@ from ..models import PriceLevel, Quote, SymbolMeta, User, Watchlist, WatchlistIt
 from ..util import utcnow
 from . import calendar as cal
 from .news import GoogleNewsProvider, NewsProvider, SimulatedNewsProvider
-from .provider import MarketDataProvider, ProviderError
+from .provider import MarketDataProvider, ProviderError, SymbolNotFound
 from .resilient import Breaker, ResilientProvider
 from .simulated import SimulatedProvider
-from .store import upsert_bars, upsert_news, upsert_quote
+from .store import ensure_symbol, upsert_bars, upsert_news, upsert_quote
 from .yahoo import YahooProvider
 
 log = logging.getLogger(__name__)
 
 QUOTE_BATCH = 20
 HOT_WINDOW = timedelta(minutes=15)
+MISSES_BEFORE_UNAVAILABLE = 2      # consecutive "not in response" before we give up on a ticker
+UNAVAILABLE_RETRY = timedelta(hours=24)
 
 
 def build_provider(settings: Settings) -> ResilientProvider:
@@ -79,6 +81,10 @@ class MarketService:
         self.news_active: str | None = self.news_chain[0].name if self.news_chain else None
         self._task: asyncio.Task | None = None
         self._wake = asyncio.Event()
+        # Symbols with a fetch in progress, per kind. The refresh loop, a
+        # sample-list warmup and an "add symbol" can all want the same
+        # ticker at the same moment; only one request goes out.
+        self._inflight: dict[str, set[str]] = {"quote": set(), "bars": set(), "news": set()}
         self.last_tick_at = None
         self.last_error: str | None = None
 
@@ -127,16 +133,26 @@ class MarketService:
             quotes = {q.symbol: q for q in db.scalars(select(Quote).where(Quote.symbol.in_(tracked)))}
             metas = {m.symbol: m for m in db.scalars(select(SymbolMeta).where(SymbolMeta.symbol.in_(tracked)))}
 
+            def skip(sym: str) -> bool:
+                m = metas.get(sym)
+                if m is None or not m.unavailable:
+                    return False
+                # Retry a dead ticker once a day in case it was a transient miss.
+                return not (m.bars_refreshed_at and now - m.bars_refreshed_at > UNAVAILABLE_RETRY)
+
             due_quotes = []
             for s in tracked:
+                if skip(s):
+                    continue
                 q = quotes.get(s)
                 interval = base if s in hot else base * 3
                 if q is None or (now - q.fetched_at).total_seconds() >= interval:
                     due_quotes.append(s)
 
             due_bars = []
-            last_completed = cal.previous_trading_day(state.session_date) if state.is_open else state.session_date
             for s in tracked:
+                if skip(s):
+                    continue
                 m = metas.get(s)
                 if m is None or m.bars_refreshed_at is None:
                     due_bars.append(s)
@@ -150,6 +166,8 @@ class MarketService:
             due_news = []
             if self.news_chain:
                 for s in tracked:
+                    if skip(s):
+                        continue
                     m = metas.get(s)
                     mins = self.settings.news_refresh_minutes * (1 if s in hot else 4)
                     if m is None or m.news_refreshed_at is None or (now - m.news_refreshed_at).total_seconds() >= mins * 60:
@@ -157,48 +175,100 @@ class MarketService:
 
         if due_quotes:
             await self.refresh_quotes(due_quotes)
-        for s in due_bars[:10]:  # bars are heavier; spread them across ticks
-            await self.refresh_bars(s)
-        for s in due_news[:6]:   # news is heaviest and least urgent; trickle it
-            await self.refresh_news(s)
+        # Bars and news are heavier; a bounded slice per tick, fetched concurrently
+        # (the providers cap their own connection counts).
+        await asyncio.gather(*(self.refresh_bars(s) for s in due_bars[:12]),
+                             *(self.refresh_news(s) for s in due_news[:8]))
         self.last_tick_at = now
+
+    async def warm(self, symbols: list[str]) -> None:
+        """Fetch everything for a set of symbols, concurrently, deduplicated
+        against whatever the loop is already doing. Used when a watchlist is
+        created so the first briefing is populated within a couple of seconds
+        without blocking the request that created it."""
+        await self.refresh_quotes(symbols)
+        await asyncio.gather(*(self.refresh_bars(s) for s in symbols))
+        await asyncio.gather(*(self.refresh_news(s) for s in symbols))
 
     # ------------------------------------------------------------ fetchers
     async def refresh_quotes(self, symbols: list[str]) -> int:
+        symbols = [s for s in symbols if s not in self._inflight["quote"]]
+        if not symbols:
+            return 0
+        self._inflight["quote"].update(symbols)
         updated = 0
-        for i in range(0, len(symbols), QUOTE_BATCH):
-            batch = symbols[i : i + QUOTE_BATCH]
-            try:
-                fetched = await self.provider.get_quotes(batch)
-                self.last_error = None
-            except ProviderError as e:
-                self.last_error = str(e)
-                log.warning("quote refresh failed for %d symbols: %s", len(batch), e)
-                continue
-            with session_scope() as db:
-                for q in fetched.values():
-                    if upsert_quote(db, q, primary_source=self.provider.chain[0].name):
-                        updated += 1
+        try:
+            for i in range(0, len(symbols), QUOTE_BATCH):
+                batch = symbols[i : i + QUOTE_BATCH]
+                try:
+                    fetched = await self.provider.get_quotes(batch)
+                    self.last_error = None
+                except ProviderError as e:
+                    self.last_error = str(e)
+                    log.warning("quote refresh failed for %d symbols: %s", len(batch), e)
+                    continue
+                with session_scope() as db:
+                    for q in fetched.values():
+                        if upsert_quote(db, q, primary_source=self.provider.chain[0].name):
+                            updated += 1
+                        meta = ensure_symbol(db, q.symbol)
+                        meta.miss_count, meta.unavailable, meta.unavailable_reason = 0, False, None
+                    # The provider answered but left some symbols out: the ticker
+                    # is probably wrong. Two strikes and we stop asking.
+                    for s in batch:
+                        if s in fetched:
+                            continue
+                        meta = ensure_symbol(db, s)
+                        meta.miss_count = (meta.miss_count or 0) + 1
+                        if meta.miss_count >= MISSES_BEFORE_UNAVAILABLE and not meta.unavailable:
+                            meta.unavailable = True
+                            meta.unavailable_reason = f"not found on {self.provider.active}"
+                            meta.bars_refreshed_at = utcnow()
+                            log.warning("marking %s unavailable (%s)", s, meta.unavailable_reason)
+        finally:
+            self._inflight["quote"].difference_update(symbols)
         return updated
 
     async def refresh_bars(self, symbol: str) -> int:
-        try:
-            bars = await self.provider.get_daily_bars(symbol, days=300)
-        except ProviderError as e:
-            self.last_error = str(e)
-            log.warning("bars refresh failed for %s: %s", symbol, e)
+        if symbol in self._inflight["bars"]:
             return 0
-        with session_scope() as db:
-            return upsert_bars(db, symbol, bars)
+        self._inflight["bars"].add(symbol)
+        try:
+            try:
+                bars = await self.provider.get_daily_bars(symbol, days=300)
+            except SymbolNotFound:
+                with session_scope() as db:
+                    meta = ensure_symbol(db, symbol)
+                    meta.unavailable, meta.unavailable_reason = True, f"not found on {self.provider.active}"
+                    meta.bars_refreshed_at = utcnow()
+                log.warning("%s: symbol not found on %s — marked unavailable", symbol, self.provider.active)
+                return 0
+            except ProviderError as e:
+                self.last_error = str(e)
+                log.warning("bars refresh failed for %s: %s", symbol, e)
+                return 0
+            with session_scope() as db:
+                return upsert_bars(db, symbol, bars)
+        finally:
+            self._inflight["bars"].discard(symbol)
 
     async def refresh_news(self, symbol: str) -> int:
         """Walk the news chain with per-provider breakers. News failing is
         never fatal — the briefing simply shows fewer headlines."""
         from .universe import BY_SYMBOL
 
-        with session_scope() as db:
-            meta = db.get(SymbolMeta, symbol)
-            company = meta.name if meta else (BY_SYMBOL[symbol].name if symbol in BY_SYMBOL else symbol)
+        if symbol in self._inflight["news"] or not self.news_chain:
+            return 0
+        self._inflight["news"].add(symbol)
+        try:
+            with session_scope() as db:
+                meta = db.get(SymbolMeta, symbol)
+                company = meta.name if meta else (BY_SYMBOL[symbol].name if symbol in BY_SYMBOL else symbol)
+            return await self._fetch_news(symbol, company)
+        finally:
+            self._inflight["news"].discard(symbol)
+
+    async def _fetch_news(self, symbol: str, company: str) -> int:
         for p in self.news_chain:
             br = self.news_breakers[p.name]
             if not br.allow():
@@ -230,8 +300,12 @@ class MarketService:
             return False
         with session_scope() as db:
             upsert_quote(db, quotes[symbol], primary_source=self.provider.chain[0].name)
+            meta = ensure_symbol(db, symbol)
+            meta.miss_count, meta.unavailable, meta.unavailable_reason = 0, False, None
+        # History is needed for the card to make sense (σ, 52w) — one request,
+        # worth waiting for. Headlines can arrive a second later.
         await self.refresh_bars(symbol)
-        await self.refresh_news(symbol)
+        asyncio.ensure_future(self.refresh_news(symbol))
         return True
 
     # ------------------------------------------------------------ queries

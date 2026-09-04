@@ -73,23 +73,38 @@ class YahooProvider(MarketDataProvider):
         as_of = _ts(m.get("regularMarketTime"))
         if price is None or as_of is None:
             return None
-        # Today's OHLC lives in the last row of the indicators when the market
-        # is open; meta has the day range in newer payloads. Be liberal.
+        # Careful with "previous close": `chartPreviousClose` is the close before
+        # the *chart range* (5 sessions ago here), not yesterday's. Derive it
+        # from the daily rows: the close of the session before the print's date.
         ind = (res.get("indicators", {}).get("quote") or [{}])[0]
-        last = -1
-        opens = ind.get("open") or []
+        ts = res.get("timestamp") or []
+        opens, closes = ind.get("open") or [], ind.get("close") or []
+        today_idx = next((i for i, t in enumerate(ts) if _ts(t) and _ts(t).date() == as_of.date()), None)
+        prev_close = None
+        today_open = None
+        if today_idx is not None:
+            today_open = _f(opens[today_idx]) if today_idx < len(opens) else None
+            for j in range(today_idx - 1, -1, -1):
+                if j < len(closes) and closes[j] is not None:
+                    prev_close = float(closes[j])
+                    break
+        if prev_close is None:
+            prev_close = _f(m.get("regularMarketPreviousClose") or m.get("previousClose"))
         return QuoteData(
             symbol=symbol,
             price=float(price),
             as_of=as_of,
-            prev_close=_f(m.get("chartPreviousClose") or m.get("previousClose")),
-            open=_f(opens[last]) if opens else None,
+            prev_close=prev_close,
+            open=today_open,
             day_high=_f(m.get("regularMarketDayHigh")),
             day_low=_f(m.get("regularMarketDayLow")),
             volume=int(m["regularMarketVolume"]) if m.get("regularMarketVolume") is not None else None,
             name=m.get("longName") or m.get("shortName"),
             currency=m.get("currency") or "INR",
             source=self.name,
+            # Yahoo declares its own lag per exchange. NSE is usually 15; if it
+            # says 0 we take it at its word and only then call the price live.
+            delay_minutes=int(m["exchangeDataDelayedBy"]) if m.get("exchangeDataDelayedBy") is not None else 15,
         )
 
     async def get_quotes(self, symbols: list[str]) -> dict[str, QuoteData]:

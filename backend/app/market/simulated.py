@@ -20,17 +20,17 @@ from datetime import date, datetime, timedelta
 
 from ..util import utcnow
 from . import calendar as cal
-from .provider import BarData, MarketDataProvider, ProviderError, QuoteData
+from .provider import BarData, MarketDataProvider, ProviderError, QuoteData, SymbolNotFound
 from .universe import BY_SYMBOL, SymbolInfo
 
 # (sessions_ago, daily_return, volume_multiple) — layered on the generated series.
 # sessions_ago=0 is the most recent completed session.
 EVENTS: dict[str, list[tuple[int, float, float]]] = {
-    "TATAMOTORS.NS": [(2, 0.008, 1.0), (1, 0.004, 0.9), (0, -0.058, 3.1)],  # sharp drop on heavy volume
+    "TMPV.NS": [(2, 0.008, 1.0), (1, 0.004, 0.9), (0, -0.058, 3.1)],  # sharp drop on heavy volume
     "INDUSINDBK.NS": [(1, -0.041, 2.4), (0, -0.012, 1.6)],
     "HAL.NS": [(2, 0.031, 1.8), (1, 0.022, 1.5), (0, 0.018, 1.7)],  # grinding to a 52w high
     "BAJFINANCE.NS": [(0, 0.046, 2.6)],
-    "ZOMATO.NS": [(3, 0.052, 2.0), (0, -0.034, 1.9)],
+    "ETERNAL.NS": [(3, 0.052, 2.0), (0, -0.034, 1.9)],
     "SUZLON.NS": [(0, 0.071, 3.5)],
     "ITC.NS": [],                                   # deliberately boring
 }
@@ -67,6 +67,7 @@ class SimulatedProvider(MarketDataProvider):
     def __init__(self, history_days: int = 400, *, fail: bool = False):
         self.history_days = history_days
         self.fail = fail  # tests flip this to exercise the circuit breaker
+        self.unknown: set[str] = set()  # tests: symbols this feed pretends not to know
         self.calls = 0
 
     # ------------------------------------------------------------ internals
@@ -116,12 +117,16 @@ class SimulatedProvider(MarketDataProvider):
             # Deterministic random walk to the current minute.
             steps = [rng.gauss(0, daily_vol / math.sqrt(_SESSION_MINUTES)) for _ in range(_SESSION_MINUTES)]
             # Scripted "today" event so an open-market demo has drama too.
-            gap = {"INDUSINDBK.NS": -0.025, "SUZLON.NS": 0.03}.get(symbol, rng.gauss(0, daily_vol * 0.3))
+            scripted_gap = {"INDUSINDBK.NS": -0.025, "SUZLON.NS": 0.03, "TMPV.NS": -0.012}
+            gap = scripted_gap.get(symbol, rng.gauss(0, daily_vol * 0.3))
+            # Scripted names get a calmer intraday walk so the story they were
+            # scripted to tell survives the random component.
+            damp = 0.3 if symbol in scripted_gap else 1.0
             path = [prev_close * math.exp(gap)]
             for s in steps[: max(minute, 1)]:
-                path.append(path[-1] * math.exp(s))
+                path.append(path[-1] * math.exp(s * damp))
             price = path[-1]
-            vol_mult = {"TATAMOTORS.NS": 1.4, "INDUSINDBK.NS": 2.2, "SUZLON.NS": 2.8}.get(symbol, 1.0)
+            vol_mult = {"TMPV.NS": 1.4, "INDUSINDBK.NS": 2.2, "SUZLON.NS": 2.8}.get(symbol, 1.0)
             avg_vol = sum(b.volume for b in bars[-20:]) / 20
             return QuoteData(
                 symbol=symbol,
@@ -134,6 +139,7 @@ class SimulatedProvider(MarketDataProvider):
                 volume=int(avg_vol * frac * vol_mult),
                 name=info.name,
                 source=self.name,
+                delay_minutes=0,
             )
         bars = self._series(symbol, st.session_date)
         last, prev = bars[-1], bars[-2]
@@ -148,6 +154,7 @@ class SimulatedProvider(MarketDataProvider):
             volume=last.volume,
             name=info.name,
             source=self.name,
+            delay_minutes=0,
         )
 
     # ------------------------------------------------------------ interface
@@ -156,12 +163,14 @@ class SimulatedProvider(MarketDataProvider):
         if self.fail:
             raise ProviderError("simulated outage")
         now = utcnow()
-        return {s: self._quote_now(s, now) for s in symbols}
+        return {s: self._quote_now(s, now) for s in symbols if s not in self.unknown}
 
     async def get_daily_bars(self, symbol: str, days: int = 365) -> list[BarData]:
         self.calls += 1
         if self.fail:
             raise ProviderError("simulated outage")
+        if symbol in self.unknown:
+            raise SymbolNotFound(symbol)
         st = cal.market_state(utcnow())
         last = cal.previous_trading_day(st.session_date) if st.is_open else st.session_date
         return self._series(symbol, last)[-days:]

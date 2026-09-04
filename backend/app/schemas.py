@@ -108,6 +108,7 @@ class Freshness(BaseModel):
     as_of: datetime | None
     fetched_at: datetime | None
     source: str | None
+    delay_minutes: int | None = None
 
 
 class QuoteOut(BaseModel):
@@ -199,6 +200,7 @@ class BriefingOut(BaseModel):
     watchlist_version: int
     generated_at: datetime
     new_visit: bool
+    first_visit: bool      # no baselines existed before this request: nothing to diff yet
     market: MarketOut
     data: DataStatus
     summary: BriefingSummary

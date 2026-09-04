@@ -16,7 +16,7 @@ interface Props {
 const ticker = (s: string) => s.replace(/\.NS$/, '').replace(/^\^/, '')
 
 function Chip({ r, dir }: { r: Reason; dir: 'up' | 'down' | 'flat' }) {
-  const cls = ['chip', r.severity, r.kind === 'news' ? 'news' : '', r.kind === 'level' ? 'level' : '', dir === 'up' && r.kind === 'move' ? 'pos' : ''].join(' ')
+  const cls = ['chip', r.kind === 'error' ? 'error' : r.severity, r.kind === 'news' ? 'news' : '', r.kind === 'level' ? 'level' : '', dir === 'up' && r.kind === 'move' ? 'pos' : ''].join(' ')
   return <span className={cls} title={r.text}>{r.text}</span>
 }
 
@@ -53,7 +53,7 @@ export function StockCard(p: Props) {
           {s ? (
             <>
               <div className={`big ${dir}`}>{pct(s.change_pct)}</div>
-              <div className="lbl">since {s.seen_label}{s.z != null ? ` · ${Math.abs(s.z).toFixed(1)}σ` : ''}</div>
+              <div className="lbl">since {s.seen_label}{s.z != null && Math.abs(s.z) >= 0.05 ? ` · ${Math.abs(s.z).toFixed(1)}σ` : ''}</div>
             </>
           ) : <div className="lbl">—</div>}
         </div>
@@ -80,7 +80,7 @@ export function StockCard(p: Props) {
             {item.high_52w != null && item.low_52w != null && (
               <>
                 <h4 style={{ marginTop: 16 }}>52-week range</h4>
-                <div className="range"><div className="pin" style={{ left: `${(item.range_position_52w ?? 0) * 100}%` }} /></div>
+                <div className="range"><div className="fill" style={{ width: `${(item.range_position_52w ?? 0) * 100}%` }} /><div className="pin" style={{ left: `${(item.range_position_52w ?? 0) * 100}%` }} /></div>
                 <div className="range-l"><span className="num">{inr(item.low_52w)}</span><span className="num">{inr(item.high_52w)}</span></div>
               </>
             )}
@@ -136,10 +136,11 @@ export function StockCard(p: Props) {
 export function QuietRow({ item, onClick }: { item: BriefingItem; onClick: () => void }) {
   const s = item.since, q = item.quote
   const move = item.reasons.find(r => r.kind === 'move')
+  const err = item.reasons.find(r => r.kind === 'error')
   return (
     <div className="quiet-row" onClick={onClick}>
       <span className="t">{ticker(item.symbol)}</span>
-      <span className="n">{move ? move.text : item.reasons[0]?.text ?? item.name}</span>
+      <span className={`n ${err ? 'error' : ''}`}>{err ? err.text : move ? move.text : item.reasons[0]?.text ?? item.name}</span>
       <span className="spark"><Sparkline data={item.sparkline} width={70} height={22} baseline={s?.baseline_price ?? null} /></span>
       <span className="num muted" style={{ width: 80, textAlign: 'right' }}>{inr(q?.price)}</span>
       <span className={`num ${sign(s?.change_pct)}`} style={{ width: 60, textAlign: 'right' }}>{pct(s?.change_pct)}</span>

@@ -214,7 +214,9 @@ def assess(
 
     # ---- 4. gap open (only if it happened after they last looked) ----
     gap_pct = None
-    if quote.open and quote.prev_close and quote.prev_close > 0 and not same_print:
+    session_open = cal._utc_naive(cal._ist(quote.as_of).date(), cal.OPEN)
+    gap_is_new = baseline.as_of < session_open   # they haven't seen this session's open yet
+    if quote.open and quote.prev_close and quote.prev_close > 0 and not same_print and gap_is_new:
         g = quote.open / quote.prev_close - 1
         if abs(g) >= 2 * sig:
             gap_pct = g
@@ -241,6 +243,8 @@ def assess(
 
     if same_print:
         reasons.append(Reason("info", "low", "No new prints since you last looked" + (" — market closed" if not market_open else "")))
+    elif abs(change_pct) < 0.0005:
+        reasons.append(Reason("info", "low", f"Unchanged since you looked ({since_txt})"))
     elif z is not None:
         az = abs(z)
         direction = "up" if change_pct > 0 else "down"

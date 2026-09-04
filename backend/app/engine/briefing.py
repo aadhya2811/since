@@ -21,19 +21,23 @@ def freshness(q: Quote | None, now: datetime, state: cal.MarketState) -> schemas
     if q is None:
         return schemas.Freshness(status="missing", label="No data yet", as_of=None, fetched_at=None, source=None)
     print_age = now - q.as_of
+    declared = q.delay_minutes   # vendor's own statement of lag; trumps our clock arithmetic
     if state.is_open:
-        if print_age <= timedelta(minutes=2):
-            status, label = "live", "Live"
-        elif print_age <= timedelta(minutes=20):
-            status, label = "delayed", f"Delayed ~{max(1, int(print_age.total_seconds() // 60))} min"
-        else:
+        if print_age > timedelta(minutes=20 + (declared or 0)):
             status, label = "stale", f"Stale — last print {humanize_since(q.as_of, now)}"
+        elif declared:
+            status, label = "delayed", f"Delayed {declared} min (feed)"
+        elif print_age <= timedelta(minutes=2):
+            status, label = "live", "Live"
+        else:
+            status, label = "delayed", f"Delayed ~{max(1, int(print_age.total_seconds() // 60))} min"
     else:
         if q.as_of >= state.last_close - timedelta(minutes=30):
             status, label = "closed", f"At close, {cal._ist(q.as_of):%a %d %b}"
         else:
             status, label = "stale", f"Last print {cal._ist(q.as_of):%d %b %H:%M} IST"
-    return schemas.Freshness(status=status, label=label, as_of=q.as_of, fetched_at=q.fetched_at, source=q.source)
+    return schemas.Freshness(status=status, label=label, as_of=q.as_of, fetched_at=q.fetched_at, source=q.source,
+                             delay_minutes=q.delay_minutes)
 
 
 def apply_news(tier: str, reasons: list, new_news: list[schemas.NewsOut]):
@@ -100,6 +104,7 @@ def build_briefing(
         for lv in db.scalars(select(PriceLevel).where(PriceLevel.user_id == user.id, PriceLevel.symbol.in_(symbols))):
             levels_by[lv.symbol].append(lv)
     baselines = bl.get_baselines(db, user.id, symbols)
+    first_visit = bool(symbols) and not baselines
     frac = cal.session_fraction_elapsed(now)
     news_by = get_news_many(db, symbols, since=now - timedelta(days=7))
 
@@ -120,9 +125,15 @@ def build_briefing(
 
         if q is None:
             missing += 1
+            if meta is not None and meta.unavailable:
+                why = schemas.ReasonOut(kind="error", severity="high",
+                                        text=f"Not available on the {meta.unavailable_reason.split()[-1] if meta.unavailable_reason else 'data'} feed — "
+                                             "the ticker may be renamed or delisted. Remove it or add the new symbol.")
+            else:
+                why = schemas.ReasonOut(kind="info", severity="low", text="Waiting for first quote…")
             items.append(schemas.BriefingItem(
                 symbol=it.symbol, name=name, sector=sector, tier="quiet", score=0, quote=None, since=None,
-                reasons=[schemas.ReasonOut(kind="info", severity="low", text="Waiting for first quote…")],
+                reasons=[why],
                 volume_ratio=None, range_position_52w=None, high_52w=None, low_52w=None, sigma_daily=None,
                 streak=0, sparkline=spark, levels=lv_out, levels_crossed=[],
                 news=schemas.NewsSummary(new_count=0, items=[])))
@@ -176,6 +187,7 @@ def build_briefing(
         watchlist_version=wl.version,
         generated_at=now,
         new_visit=new_visit,
+        first_visit=first_visit,
         market=schemas.MarketOut(is_open=state.is_open, phase=state.phase, session_date=state.session_date.isoformat(),
                                  last_close=state.last_close, next_open=state.next_open),
         data=schemas.DataStatus(active_provider=data_status.get("active", "unknown"),

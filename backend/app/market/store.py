@@ -49,7 +49,8 @@ def upsert_quote(db: Session, q: QuoteData, *, primary_source: str | None = None
     row = db.get(Quote, q.symbol)
     if row is None:
         db.add(Quote(symbol=q.symbol, price=q.price, prev_close=q.prev_close, open=q.open, day_high=q.day_high,
-                     day_low=q.day_low, volume=q.volume, as_of=q.as_of, fetched_at=now, source=q.source))
+                     day_low=q.day_low, volume=q.volume, as_of=q.as_of, fetched_at=now, source=q.source,
+                     delay_minutes=q.delay_minutes))
         ensure_symbol(db, q.symbol, q.name)
         return True
     if q.as_of < row.as_of:
@@ -64,6 +65,7 @@ def upsert_quote(db: Session, q: QuoteData, *, primary_source: str | None = None
     row.price, row.prev_close, row.open = q.price, q.prev_close, q.open
     row.day_high, row.day_low, row.volume = q.day_high, q.day_low, q.volume
     row.as_of, row.fetched_at, row.source = q.as_of, now, q.source
+    row.delay_minutes = q.delay_minutes
     if q.name:
         ensure_symbol(db, q.symbol, q.name)
     return changed

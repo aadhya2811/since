@@ -5,7 +5,7 @@ import pytest
 
 from app.db import Base, SessionLocal, engine
 from app.market import calendar as cal
-from app.market.provider import BarData, ProviderError, QuoteData
+from app.market.provider import BarData, ProviderError, QuoteData, SymbolNotFound
 from app.market.resilient import Breaker, ResilientProvider
 from app.market.simulated import SimulatedProvider
 from app.market.store import get_bars, upsert_bars, upsert_quote
@@ -120,3 +120,18 @@ async def test_resilient_provider_fails_over_and_reports_degraded():
     fallback.fail = True
     with pytest.raises(ProviderError):
         await rp.get_quotes(["TCS.NS"])
+
+
+@pytest.mark.asyncio
+async def test_symbol_not_found_does_not_trip_breaker_or_fall_back():
+    primary, fallback = SimulatedProvider(), SimulatedProvider()
+    primary.name, fallback.name = "primary", "fallback"
+    primary.unknown = {"NOPE.NS"}
+    rp = ResilientProvider([primary, fallback], threshold=2, reset_seconds=1000)
+    for _ in range(3):
+        with pytest.raises(SymbolNotFound):
+            await rp.get_daily_bars("NOPE.NS")
+    assert rp.breakers["primary"].state == "closed"
+    assert rp.breakers["primary"].failures == 0
+    assert fallback.calls == 0                         # never answered with made-up data
+    assert not rp.status()["degraded"]

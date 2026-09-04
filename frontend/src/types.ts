@@ -3,7 +3,7 @@ export interface User { id: number; email: string }
 export interface ItemOut { symbol: string; name: string; position: number; added_at: string }
 export interface Watchlist { id: number; name: string; version: number; updated_at: string; items: ItemOut[] }
 
-export interface Freshness { status: 'live' | 'delayed' | 'closed' | 'stale' | 'missing'; label: string; as_of: string | null; fetched_at: string | null; source: string | null }
+export interface Freshness { status: 'live' | 'delayed' | 'closed' | 'stale' | 'missing'; label: string; as_of: string | null; fetched_at: string | null; source: string | null; delay_minutes: number | null }
 export interface QuoteOut {
   price: number; prev_close: number | null; open: number | null; day_high: number | null; day_low: number | null
   volume: number | null; day_change_pct: number | null; freshness: Freshness
@@ -27,7 +27,7 @@ export interface BriefingItem {
 }
 
 export interface Briefing {
-  watchlist_id: number; watchlist_version: number; generated_at: string; new_visit: boolean
+  watchlist_id: number; watchlist_version: number; generated_at: string; new_visit: boolean; first_visit: boolean
   market: { is_open: boolean; phase: string; session_date: string; last_close: string; next_open: string }
   data: { active_provider: string; degraded: boolean; note: string | null }
   summary: { attention: number; notable: number; quiet: number; missing: number; headline: string }

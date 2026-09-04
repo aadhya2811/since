@@ -14,8 +14,8 @@ Record with the offline demo (`make demo` or `SINCE_PROVIDER=simulated SINCE_NEW
 | 1:35 | Click **Seen it ✓** | "Acknowledge resets the baseline for that stock. Next time I come back, it diffs from here." |
 | 1:45 | Status strip | "Every price carries its freshness — Yahoo's NSE feed is 15 minutes delayed, and the app says so instead of pretending. If the feed dies, a circuit breaker fails over to a simulated feed and a banner tells you." |
 | 1:55 | (optional) open in a second tab / phone | "Same account on another device: same baselines, same acknowledgements. Edit the list on both at once and the loser gets a 409 and reloads — no lost updates." |
-| 2:00 | README | "Architecture, every decision and trade-off, 30 tests. Thanks." |
+| 2:00 | README | "Architecture, every decision and trade-off, 34 tests. Thanks." |
 
 ## Judge-facing one-liner (for the submission form)
 
-> A watchlist that opens as a briefing. It keeps a per-user baseline of what you last saw, scores every move as a z-score against that stock's own volatility over the sessions elapsed, and triages your list into needs-attention / worth-a-glance / quiet with plain-English reasons and the headline that likely explains each move. FastAPI + React, real NSE data with circuit-breaker fallback, optimistic concurrency across devices, 30 tests.
+> A watchlist that opens as a briefing. It keeps a per-user baseline of what you last saw, scores every move as a z-score against that stock's own volatility over the sessions elapsed, and triages your list into needs-attention / worth-a-glance / quiet with plain-English reasons and the headline that likely explains each move. FastAPI + React, real NSE data with circuit-breaker fallback, optimistic concurrency across devices, 34 tests.

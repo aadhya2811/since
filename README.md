@@ -16,7 +16,11 @@ INDUSINDBK   ₹810.76  −2.3% today          −7.4% since Tuesday · 2.2σ
 
 ![Since — briefing view](docs/screenshot.png)
 
-Built end-to-end: FastAPI + SQLite backend, React/TypeScript frontend, real market data (Yahoo Finance, ~15 min delayed for NSE) with a deterministic simulated feed for tests and offline demos, and free news via Google News RSS. 30 backend tests. One container.
+The moment a visit starts, the briefing pops up as a summary — and on a first visit it explains that the baseline was just set and offers to rewind:
+
+![What's new popup](docs/screenshot-whatsnew.png)
+
+Built end-to-end: FastAPI + SQLite backend, React/TypeScript frontend, real market data (Yahoo Finance, ~15 min delayed for NSE) with a deterministic simulated feed for tests and offline demos, and free news via Google News RSS. 34 backend tests. One container.
 
 ---
 
@@ -222,13 +226,16 @@ Every stored quote has two timestamps: `as_of` (the exchange time of the print) 
 
 |Situation|Behaviour|
 |---|---|
-|Yahoo's NSE feed is ~15 min behind|The badge says *Delayed ~14 min*, computed from `as_of`, not pretended live.|
+|Yahoo's NSE feed is ~15 min behind|Yahoo's payload declares its own lag (`exchangeDataDelayedBy`); we store it per quote and the badge says *Delayed 15 min (feed)*. Yahoo stamps delayed prints with a recent timestamp, so clock arithmetic alone would wrongly say "Live" — the vendor's declaration wins. A broker feed that declares 0 would earn the *Live* badge.|
 |Market closed|Badge says *At close, Thu 4 Sep*; the refresh loop slows to every 15 min; "since you looked" says *no new prints — market closed* instead of inventing a 0.0% move.|
 |Provider slow; an older response lands after a newer one|**Market time only moves forward.** A quote with `as_of` older than the stored one is discarded (`test_quote_never_moves_backwards_in_market_time`).|
 |Two sources disagree on the same print|Primary source wins; the disagreement is logged with both values. If we only had the fallback's number, a primary print at the same time replaces it.|
 |Provider down|Circuit breaker opens after 3 failures, traffic moves to the fallback, a banner says so. If every source is down, the last good snapshot is served and marked *Stale — last print 40 min ago*. The UI never goes blank.|
 |Re-fetched history disagrees with stored bars (corrections)|Bars are upserted by `(symbol, date)`; a corrected close replaces, never duplicates.|
 |Very new listing / short history|σ falls back to a default and the card says *Limited price history — volatility estimate is a default*.|
+|Ticker renamed or delisted (Zomato → ETERNAL, Tata Motors → TMPV/TMCV in 2025)|A `SymbolNotFound` is *not* a provider failure: it does not trip the breaker and is never answered with fallback data (that would be made-up prices for a real ticker). Two consecutive misses mark the symbol unavailable, polling stops, and the row says so and suggests fixing the ticker. Old names people still type are aliased to the new ones in search.|
+|Yahoo's `chartPreviousClose`|Is the close before the *chart range*, not yesterday's. Day change is derived from the daily rows instead — a wrong "prev close" makes every day-change figure wrong.|
+|Same symbol wanted by the refresh loop, a sample-list warmup and an "add symbol" at once|An in-flight set per fetch kind: one request goes out, the others skip.|
 
 ### 5.7 Why these technologies
 
@@ -286,14 +293,14 @@ The rubric asks where to keep things simple. These were considered and cut on pu
 ## 9. Testing
 
 ```
-cd backend && python -m pytest -q      # 30 tests, ~3s, no network
+cd backend && python -m pytest -q      # 34 tests, ~4s, no network
 ```
 
 |File|Covers|
 |---|---|
 |`test_significance.py`|the scoring model: per-stock volatility, session scaling, levels both directions, 52w breach on a tiny move, session-adjusted volume, gap detection, short-history fallback, σ floor, reason ordering|
-|`test_market_infra.py`|NSE calendar (weekends, holidays, session counting), store conflict rules (monotonic time, primary wins), bar upsert idempotency, circuit breaker state machine, failover + degraded status|
-|`test_api.py`|auth (bad/reused codes, 401), two devices share state, 409 with current state + successful retry, idempotent add/remove, tenant isolation, baseline advances on new visit not refresh, idle timeout, acknowledge, rewind, level crossing in the briefing, news diffed against baseline, briefing survives provider outage|
+|`test_market_infra.py`|NSE calendar (weekends, holidays, session counting), store conflict rules (monotonic time, primary wins), bar upsert idempotency, circuit breaker state machine, failover + degraded status, symbol-not-found does not trip the breaker or fall back|
+|`test_api.py`|auth (bad/reused codes, 401), two devices share state, 409 with current state + successful retry, idempotent add/remove, tenant isolation, baseline advances on new visit not refresh, idle timeout, acknowledge, rewind, level crossing in the briefing, news diffed against baseline, briefing survives provider outage, unknown tickers rejected and delisted ones flagged, old ticker names resolve, vendor-declared delay beats the "Live" label|
 
 The simulated provider makes every test deterministic and network-free. The Yahoo and Google News providers are exercised manually (`SINCE_PROVIDER=yahoo`).
 
@@ -325,6 +332,7 @@ In the order I would do them:
 3. **Push delivery** of the briefing when something crosses into *Needs attention* while you're away — the engine already produces exactly the payload.
 4. **Postgres + multi-worker refresh** as described in §7, when symbol count × users makes one loop the bottleneck.
 5. **Earnings calendar** as a first-class event ("results on Thursday") — the one scheduled thing every watcher wants to know.
+6. **A real-time broker feed** (Zerodha Kite Connect, Groww API) behind the same `MarketDataProvider` interface — one new file — so the *Live* badge is earned rather than declared.
 
 ---
 

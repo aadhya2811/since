@@ -13,7 +13,7 @@ def setup_list(client, headers):
     r = client.post("/api/watchlists", json={"name": "Core"}, headers=headers)
     assert r.status_code == 201
     wl = r.json()
-    for s in ["TCS.NS", "TATAMOTORS.NS"]:
+    for s in ["TCS.NS", "TMPV.NS"]:
         r = client.post(f"/api/watchlists/{wl['id']}/items", json={"symbol": s}, headers=headers)
         assert r.status_code == 201, r.text
     return client.get("/api/watchlists", headers=headers).json()[0]
@@ -56,7 +56,7 @@ def test_two_devices_share_one_account(client):
     h2 = login(client, device="phone")
     wl = setup_list(client, h1)
     lists = client.get("/api/watchlists", headers=h2).json()
-    assert [i["symbol"] for i in lists[0]["items"]] == ["TCS.NS", "TATAMOTORS.NS"]
+    assert [i["symbol"] for i in lists[0]["items"]] == ["TCS.NS", "TMPV.NS"]
     sessions = client.get("/api/auth/sessions", headers=h2).json()
     assert sorted(s["device_label"] for s in sessions) == ["laptop", "phone"]
     assert sum(s["current"] for s in sessions) == 1
@@ -160,7 +160,7 @@ def test_rewind_sets_baseline_to_a_past_close(client):
     r = client.post(f"/api/watchlists/{wl['id']}/demo/rewind", json={"sessions": 3}, headers=h)
     assert r.json()["rewound"] == 2
     b = brief(client, h, wl["id"])
-    tm = next(i for i in b["items"] if i["symbol"] == "TATAMOTORS.NS")
+    tm = next(i for i in b["items"] if i["symbol"] == "TMPV.NS")
     assert tm["since"]["sessions"] == 3
     assert tm["since"]["change_pct"] < -0.03      # the scripted -5.8% drop is inside the window
     assert tm["tier"] in ("attention", "notable")
@@ -201,12 +201,73 @@ def test_news_is_diffed_against_baseline_and_attached_to_moves(client):
     # Rewind 3 sessions: the scripted Tata Motors drop *and* its headlines fall inside the window.
     client.post(f"/api/watchlists/{wl['id']}/demo/rewind", json={"sessions": 3}, headers=h)
     b = brief(client, h, wl["id"])
-    tm = next(i for i in b["items"] if i["symbol"] == "TATAMOTORS.NS")
+    tm = next(i for i in b["items"] if i["symbol"] == "TMPV.NS")
     assert tm["news"]["new_count"] >= 1
     assert any(r["kind"] == "news" and "JLR" in r["text"] for r in tm["reasons"])
     # Acknowledge → headlines are no longer "new".
-    client.post(f"/api/watchlists/{wl['id']}/ack", json={"symbols": ["TATAMOTORS.NS"]}, headers=h)
+    client.post(f"/api/watchlists/{wl['id']}/ack", json={"symbols": ["TMPV.NS"]}, headers=h)
     b = brief(client, h, wl["id"])
-    tm = next(i for i in b["items"] if i["symbol"] == "TATAMOTORS.NS")
+    tm = next(i for i in b["items"] if i["symbol"] == "TMPV.NS")
     assert tm["news"]["new_count"] == 0
     assert len(tm["news"]["items"]) >= 1  # still listed as context, just not flagged
+
+
+def test_unknown_ticker_is_rejected_and_delisted_one_is_flagged(client):
+    h = login(client)
+    client.market.provider.chain[0].unknown = {"OLDCO.NS"}
+    wl = setup_list(client, h)
+    r = client.post(f"/api/watchlists/{wl['id']}/items", json={"symbol": "OLDCO"}, headers=h)
+    assert r.status_code == 422                        # validated against the feed before accepting
+    # A symbol that *was* fine and later disappears (delisting/rename):
+    r = client.post(f"/api/watchlists/{wl['id']}/items", json={"symbol": "INFY"}, headers=h)
+    assert r.status_code == 201
+    client.market.provider.chain[0].unknown.add("INFY.NS")
+    import asyncio
+    loop = asyncio.new_event_loop()
+    loop.run_until_complete(client.market.refresh_bars("INFY.NS"))
+    loop.close()
+    b = brief(client, h, wl["id"])
+    infy = next(i for i in b["items"] if i["symbol"] == "INFY.NS")
+    assert infy["quote"] is not None                   # last good quote still shown
+    # ...and once quotes go missing twice, it is marked and explained instead of "waiting…" forever
+    from app.db import SessionLocal
+    from app.models import Quote, SymbolMeta
+    with SessionLocal() as db:
+        db.delete(db.get(Quote, "INFY.NS")); db.commit()
+    loop = asyncio.new_event_loop()
+    loop.run_until_complete(client.market.refresh_quotes(["INFY.NS"]))
+    loop.run_until_complete(client.market.refresh_quotes(["INFY.NS"]))
+    loop.close()
+    with SessionLocal() as db:
+        assert db.get(SymbolMeta, "INFY.NS").unavailable
+    b = brief(client, h, wl["id"])
+    infy = next(i for i in b["items"] if i["symbol"] == "INFY.NS")
+    assert infy["reasons"][0]["kind"] == "error" and "renamed or delisted" in infy["reasons"][0]["text"]
+
+
+def test_old_ticker_names_resolve_to_new_ones(client):
+    h = login(client)
+    r = client.post("/api/watchlists", json={"name": "x"}, headers=h)
+    wl = r.json()
+    r = client.post(f"/api/watchlists/{wl['id']}/items", json={"symbol": "zomato"}, headers=h)
+    assert [i["symbol"] for i in r.json()["items"]] == ["ETERNAL.NS"]
+    hits = client.get("/api/symbols/search?q=tata mot", headers=h).json()
+    assert any(x["symbol"] == "TMPV.NS" for x in hits)
+
+
+def test_vendor_declared_delay_beats_live_label(client):
+    """Yahoo stamps delayed prints with a recent time; its own delay field must win."""
+    from app.market import calendar as cal
+    h = login(client)
+    wl = setup_list(client, h)
+    with SessionLocal() as db:
+        q = db.get(Quote, "TCS.NS")
+        q.delay_minutes = 15
+        db.commit()
+    b = brief(client, h, wl["id"])
+    f = next(i for i in b["items"] if i["symbol"] == "TCS.NS")["quote"]["freshness"]
+    if cal.market_state(utcnow()).is_open:
+        assert f["status"] == "delayed" and "15 min" in f["label"]
+    else:
+        assert f["status"] in ("closed", "stale")
+    assert f["delay_minutes"] == 15

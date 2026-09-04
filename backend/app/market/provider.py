@@ -32,6 +32,7 @@ class QuoteData:
     name: str | None = None
     currency: str = "INR"
     source: str = "unknown"
+    delay_minutes: int | None = None   # what the vendor says about its own lag (0 = real-time); None = unknown
 
 
 @dataclass(frozen=True)

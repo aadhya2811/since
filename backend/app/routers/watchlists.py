@@ -12,6 +12,8 @@ for a single-device user.
 """
 from __future__ import annotations
 
+import asyncio
+
 from fastapi import APIRouter, Depends, Header, HTTPException, Request, Response, status
 from fastapi.responses import JSONResponse
 from sqlalchemy import select, update
@@ -28,8 +30,8 @@ from ..engine import baselines as bl
 
 router = APIRouter(prefix="/watchlists", tags=["watchlists"])
 
-SAMPLE_SYMBOLS = ["RELIANCE.NS", "TCS.NS", "HDFCBANK.NS", "INFY.NS", "TATAMOTORS.NS", "HAL.NS",
-                  "INDUSINDBK.NS", "ITC.NS", "BAJFINANCE.NS", "ZOMATO.NS", "SUZLON.NS", "HINDUNILVR.NS"]
+SAMPLE_SYMBOLS = ["RELIANCE.NS", "TCS.NS", "HDFCBANK.NS", "INFY.NS", "TMPV.NS", "HAL.NS",
+                  "INDUSINDBK.NS", "ITC.NS", "BAJFINANCE.NS", "ETERNAL.NS", "SUZLON.NS", "HINDUNILVR.NS"]
 
 
 def to_out(db: Session, wl: Watchlist) -> schemas.WatchlistOut:
@@ -110,12 +112,12 @@ async def create_sample(request: Request, user: User = Depends(current_user), db
         db.add(WatchlistItem(watchlist_id=wl.id, symbol=s, position=i))
     db.commit()
     db.refresh(wl)
-    request.app.state.market.poke()
-    # Warm the cache synchronously so the first briefing isn't empty.
-    await request.app.state.market.refresh_quotes(SAMPLE_SYMBOLS)
-    for s in SAMPLE_SYMBOLS:
-        await request.app.state.market.refresh_bars(s)
-        await request.app.state.market.refresh_news(s)
+    market = request.app.state.market
+    # Quotes + history synchronously (batched / concurrent, ~2s) so the first
+    # briefing is complete; headlines warm in the background.
+    await market.refresh_quotes(SAMPLE_SYMBOLS)
+    await asyncio.gather(*(market.refresh_bars(s) for s in SAMPLE_SYMBOLS))
+    asyncio.ensure_future(asyncio.gather(*(market.refresh_news(s) for s in SAMPLE_SYMBOLS)))
     return to_out(db, wl)
 
 

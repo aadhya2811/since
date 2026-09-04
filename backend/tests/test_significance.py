@@ -107,6 +107,9 @@ def test_gap_open_is_reported_only_when_large():
     assert any(r.kind == "gap" for r in gap.reasons)
     no_gap = run(bars, prev * 1.002, prev, open_=prev * 1.001)
     assert not any(r.kind == "gap" for r in no_gap.reasons)
+    # A gap the user already saw (baseline taken mid-session, after the open) is not news.
+    seen_already = run(bars, prev * 0.96, prev * 0.965, open_=prev * 0.965, baseline_as_of=datetime(2026, 9, 2, 5, 0))
+    assert not any(r.kind == "gap" for r in seen_already.reasons)
 
 
 def test_short_history_falls_back_to_default_sigma_and_says_so():
