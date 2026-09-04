@@ -1,0 +1,23 @@
+# One-click deploy on Render (free tier). The API serves the built frontend.
+services:
+  - type: web
+    name: since-watchlist
+    runtime: docker
+    dockerfilePath: ./backend/Dockerfile
+    dockerContext: .
+    plan: free
+    envVars:
+      - key: SINCE_PROVIDER
+        value: yahoo
+      - key: SINCE_FALLBACK_PROVIDER
+        value: simulated
+      - key: SINCE_NEWS_PROVIDER
+        value: google
+      - key: SINCE_AUTH_DEV_RETURN_CODE
+        value: "true"
+      - key: SINCE_DATABASE_URL
+        value: sqlite:////data/since.db
+    disk:
+      name: since-data
+      mountPath: /data
+      sizeGB: 1

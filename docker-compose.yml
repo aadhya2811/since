@@ -1,0 +1,15 @@
+services:
+  since:
+    build:
+      context: .
+      dockerfile: backend/Dockerfile
+    ports: ["8000:8000"]
+    environment:
+      SINCE_PROVIDER: yahoo          # set to "simulated" for an offline demo
+      SINCE_FALLBACK_PROVIDER: simulated
+      SINCE_NEWS_PROVIDER: google
+      SINCE_AUTH_DEV_RETURN_CODE: "true"
+    volumes:
+      - since-data:/data
+volumes:
+  since-data:
