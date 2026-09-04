@@ -3,7 +3,7 @@
  *  - the visit id (sessionStorage: a new tab / reopened browser = "came back")
  *  - optimistic concurrency: If-Match on writes, ConflictError on 409
  */
-import type { Board, Briefing, Level, PinOut, SessionOut, SymbolHit, User, Watchlist } from './types'
+import type { Board, Briefing, CompareOut, Level, MarketPage, NewsFeed, PinOut, SessionOut, SymbolHit, User, Watchlist } from './types'
 
 const BASE = (import.meta.env.VITE_API_BASE as string | undefined) ?? ''
 
@@ -72,6 +72,10 @@ export const api = {
   board: () => req<Board>('GET', '/api/pins/board'),
   pin: (symbol: string) => req<PinOut[]>('POST', '/api/pins', { symbol }),
   unpin: (symbol: string) => req<PinOut[]>('DELETE', `/api/pins/${encodeURIComponent(symbol)}`),
+
+  market: () => req<MarketPage>('GET', '/api/market'),
+  compare: (symbols: string[], sessions: number) => req<CompareOut>('GET', `/api/compare?symbols=${encodeURIComponent(symbols.join(','))}&sessions=${sessions}`),
+  news: (days = 7) => req<NewsFeed>('GET', `/api/news?days=${days}`),
 
   addLevel: (symbol: string, price: number, direction: 'above' | 'below', note: string | null) => req<Level>('POST', '/api/levels', { symbol, price, direction, note }),
   deleteLevel: (id: number) => req<void>('DELETE', `/api/levels/${id}`),

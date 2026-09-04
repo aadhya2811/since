@@ -6,9 +6,27 @@ import { AddSymbol } from './components/AddSymbol'
 import { QuietRow, StockCard } from './components/StockCard'
 import { WhatsNew } from './components/WhatsNew'
 import { PinnedBoard } from './components/PinnedBoard'
+import { NewsPage } from './pages/NewsPage'
+import { ComparePage } from './pages/ComparePage'
+import { MarketPage } from './pages/MarketPage'
 import { dateTimeIST, timeIST } from './format'
 
 const POLL_MS = 30_000
+
+type Page = 'briefing' | 'news' | 'compare' | 'market'
+function pageFromHash(): Page {
+  const h = location.hash.replace('#/', '')
+  return (['news', 'compare', 'market'] as Page[]).includes(h as Page) ? (h as Page) : 'briefing'
+}
+function useHashPage(): [Page, (p: Page) => void] {
+  const [page, setPage] = useState<Page>(pageFromHash)
+  useEffect(() => {
+    const on = () => setPage(pageFromHash())
+    window.addEventListener('hashchange', on)
+    return () => window.removeEventListener('hashchange', on)
+  }, [])
+  return [page, (p: Page) => { location.hash = p === 'briefing' ? '' : `/${p}` }]
+}
 
 export default function App() {
   const [user, setUser] = useState<User | null | undefined>(undefined)
@@ -46,6 +64,7 @@ function Main({ user, onLogout }: { user: User; onLogout: () => void }) {
   const [busy, setBusy] = useState(false)
   const shownFor = useRef<string | null>(null)   // visit id the popup was already shown for
   const { toast, show } = useToast()
+  const [page, go] = useHashPage()
 
   const active = useMemo(() => lists?.find(l => l.id === activeId) ?? null, [lists, activeId])
 
@@ -164,7 +183,12 @@ function Main({ user, onLogout }: { user: User; onLogout: () => void }) {
     <>
     <header className="topbar">
       <div className="topbar-inner">
-        <div className="brand"><h1>Since<span>.</span></h1><span className="tag">what changed since you last looked</span></div>
+        <div className="brand"><h1 onClick={() => go('briefing')} style={{ cursor: 'pointer' }}>Since<span>.</span></h1><span className="tag">what changed since you last looked</span></div>
+        <nav className="nav">
+          {(['briefing', 'news', 'compare', 'market'] as Page[]).map(p => (
+            <button key={p} className={page === p ? 'on' : ''} onClick={() => go(p)}>{p === 'briefing' ? 'Briefing' : p === 'news' ? 'News' : p === 'compare' ? 'Compare' : 'Market'}</button>
+          ))}
+        </nav>
         <div className="topbar-right">
           <span className="muted small">{user.email}</span>
           <button className="btn ghost sm" onClick={onLogout}>Sign out</button>
@@ -173,7 +197,7 @@ function Main({ user, onLogout }: { user: User; onLogout: () => void }) {
     </header>
     <div className="shell">
 
-      {briefing && (
+      {page === 'briefing' && briefing && (
         <div className="strip">
           <span><i className={`dot ${briefing.market.is_open ? 'open' : 'closed'}`} />NSE {briefing.market.is_open ? 'open' : briefing.market.phase === 'pre' ? 'pre-open' : 'closed'}
             {!briefing.market.is_open && <span className="faint"> · last close {dateTimeIST(briefing.market.last_close)} · opens {dateTimeIST(briefing.market.next_open)} IST</span>}
@@ -186,7 +210,11 @@ function Main({ user, onLogout }: { user: User; onLogout: () => void }) {
       {briefing?.data.note && <div className="banner">{briefing.data.note}</div>}
       {error && <div className="banner">{error}</div>}
 
-      {lists && lists.length > 0 && (
+      {page === 'news' && <NewsPage />}
+      {page === 'compare' && lists && <ComparePage lists={lists} />}
+      {page === 'market' && <MarketPage onAdd={async s => { if (!active) { show('Create a watchlist first.', true); return } await addSymbol(s); show(`${s.replace('.NS', '')} added to ${active.name}.`) }} />}
+
+      {page === 'briefing' && lists && lists.length > 0 && (
         <div className="tabs">
           {lists.map(l => <button key={l.id} className={`tab ${l.id === activeId ? 'active' : ''}`} onClick={() => setActiveId(l.id)}>{l.name} <span className="faint">{l.items.length}</span></button>)}
           <button className="tab" onClick={async () => { const n = prompt('Name the watchlist'); if (n) { const wl = await api.createWatchlist(n); await loadLists(); setActiveId(wl.id) } }}>+ New</button>
@@ -194,7 +222,7 @@ function Main({ user, onLogout }: { user: User; onLogout: () => void }) {
         </div>
       )}
 
-      {lists && lists.length === 0 && (
+      {page === 'briefing' && lists && lists.length === 0 && (
         <div className="hero">
           <div className="eyebrow">Welcome</div>
           <h2>Your watchlist,<br />as a briefing.</h2>
@@ -207,11 +235,11 @@ function Main({ user, onLogout }: { user: User; onLogout: () => void }) {
         </div>
       )}
 
-      {board && board.items.length > 0 && (
+      {page === 'briefing' && board && board.items.length > 0 && (
         <PinnedBoard items={board.items} onOpen={openFromTile} onUnpin={s => togglePin(s, false)} />
       )}
 
-      {active && (
+      {page === 'briefing' && active && (
         <>
           <div className="headline">
             <h2>{briefing ? briefing.summary.headline : loading ? 'Reading the market…' : ''}</h2>

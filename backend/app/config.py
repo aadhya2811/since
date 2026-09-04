@@ -26,6 +26,9 @@ class Settings(BaseSettings):
     breaker_failure_threshold: int = 3
     breaker_reset_seconds: int = 90
     scheduler_enabled: bool = True
+    # Keep daily bars for the whole static universe (~60 names) so the Market
+    # page can rank sectors and movers. One request per symbol per day.
+    universe_scan: bool = True
 
     # --- news ------------------------------------------------------------
     news_provider: str = "google"          # "google" | "simulated" | "" (off)

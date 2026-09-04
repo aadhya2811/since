@@ -39,3 +39,15 @@ export interface PinOut { id: number; symbol: string; position: number }
 export interface Board { generated_at: string; items: BriefingItem[] }
 export interface SymbolHit { symbol: string; name: string; sector: string | null }
 export interface SessionOut { id: number; device_label: string; created_at: string; last_seen_at: string; current: boolean }
+
+export interface IndexOut { symbol: string; name: string; price: number | null; ret_1d: number | null; ret_5d: number | null; ret_20d: number | null; sparkline: number[] }
+export interface SectorOut { sector: string; n: number; ret_1d: number | null; ret_5d: number | null; ret_20d: number | null; members: string[] }
+export interface MoverOut { symbol: string; name: string; sector: string | null; price: number | null; ret_1d: number | null; ret_5d: number | null; ret_20d: number | null; z_5d: number | null; sparkline: number[] }
+export interface MarketPage {
+  generated_at: string; session_date: string; is_open: boolean; universe_size: number; scanned: number
+  indices: IndexOut[]; sectors: SectorOut[]; gainers_5d: MoverOut[]; losers_5d: MoverOut[]; unusual_5d: MoverOut[]; highs_52w: MoverOut[]; lows_52w: MoverOut[]
+}
+export interface CompareSeries { symbol: string; name: string; rebased: number[]; last_price: number; return_pct: number; volatility_annual: number; max_drawdown: number; range_position_52w: number | null; avg_volume_20d: number | null; best_day: number | null; worst_day: number | null }
+export interface CompareOut { generated_at: string; sessions: number; dates: string[]; series: CompareSeries[]; correlation: (number | null)[][] }
+export interface NewsFeedItem { symbol: string; name: string; title: string; url: string; source: string; published_at: string; is_new: boolean }
+export interface NewsFeed { generated_at: string; symbols: string[]; items: NewsFeedItem[] }

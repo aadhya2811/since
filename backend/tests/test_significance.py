@@ -140,3 +140,22 @@ def test_reasons_are_ordered_move_first_then_events():
     kinds = [r.kind for r in a.reasons]
     assert kinds[0] == "move"
     assert kinds.index("level") < kinds.index("volume")
+
+
+def test_market_wide_moves_are_discounted_and_against_market_is_flagged():
+    bars = make_bars(60, 1000, 0.01)
+    # Stock -3% while Nifty -2.7%: mostly the market → one notch down, with a reason.
+    with_mkt = run(bars, 970, 1000, market_open=False, frac=1.0)          # baseline: attention (3σ)
+    a = assess(bars, QuoteIn(970, NOW, bars[-1].close), BaselineIn(1000, YESTERDAY_CLOSE, YESTERDAY_CLOSE), [], NOW,
+               market_open=False, session_fraction=1.0, market_change_pct=-0.027)
+    assert with_mkt.tier == "attention" and a.tier == "notable"
+    assert a.market_share and a.market_share > 0.85
+    assert any(r.kind == "market" and "the market" in r.text for r in a.reasons)
+    # Stock +1% while Nifty -2%: against the market → notable even though 1σ.
+    b = assess(bars, QuoteIn(1010, NOW, bars[-1].close), BaselineIn(1000, YESTERDAY_CLOSE, YESTERDAY_CLOSE), [], NOW,
+               market_open=False, session_fraction=1.0, market_change_pct=-0.02)
+    assert b.tier == "notable" and any("against the market" in r.text for r in b.reasons)
+    # A level crossing is stock-specific: never discounted.
+    c = assess(bars, QuoteIn(970, NOW, bars[-1].close), BaselineIn(1000, YESTERDAY_CLOSE, YESTERDAY_CLOSE),
+               [LevelIn(1, 980, "below")], NOW, market_open=False, session_fraction=1.0, market_change_pct=-0.027)
+    assert c.tier == "attention"

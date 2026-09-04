@@ -290,3 +290,27 @@ def test_pins_form_a_cross_watchlist_board(client):
     assert next(i for i in b["items"] if i["symbol"] == "TCS.NS")["pinned"]
     client.delete("/api/pins/HAL.NS", headers=h)
     assert [i["symbol"] for i in client.get("/api/pins/board", headers=h).json()["items"]] == ["TCS.NS"]
+
+
+def test_market_compare_and_news_pages(client):
+    h = login(client)
+    wl = setup_list(client, h)
+    client.post("/api/pins", json={"symbol": "HAL"}, headers=h)
+    # compare: rebased to 100, aligned dates, correlation matrix is square & symmetric
+    r = client.get("/api/compare?symbols=TCS.NS,TMPV.NS,hal&sessions=30", headers=h)
+    assert r.status_code == 200, r.text
+    c = r.json()
+    assert [s["symbol"] for s in c["series"]] == ["TCS.NS", "TMPV.NS", "HAL.NS"]
+    assert all(s["rebased"][0] == 100.0 for s in c["series"])
+    assert len(c["dates"]) == len(c["series"][0]["rebased"]) == c["sessions"] + 1
+    m = c["correlation"]
+    assert len(m) == 3 and abs(m[0][0] - 1.0) < 1e-6 and m[0][1] == m[1][0]
+    assert 0 < c["series"][0]["volatility_annual"] < 2
+    # news feed covers watchlist + pinned symbols
+    n = client.get("/api/news", headers=h).json()
+    assert set(n["symbols"]) == {"TCS.NS", "TMPV.NS", "HAL.NS"}
+    assert any(i["symbol"] == "TMPV.NS" and "JLR" in i["title"] for i in n["items"])
+    # market page works even with a tiny scanned universe
+    mk = client.get("/api/market", headers=h).json()
+    assert mk["universe_size"] >= 50 and mk["scanned"] >= 2
+    assert all("sector" in s for s in mk["sectors"])

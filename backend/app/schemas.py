@@ -141,6 +141,8 @@ class SinceOut(BaseModel):
     sessions: int
     z: float | None
     unusual: UnusualOut
+    market_change_pct: float | None = None
+    market_share: float | None = None
 
 
 class ReasonOut(BaseModel):
@@ -246,3 +248,96 @@ class SymbolOut(BaseModel):
     symbol: str
     name: str
     sector: str | None
+
+
+# ------------------------------------------------------------ market page
+
+
+class IndexOut(BaseModel):
+    symbol: str
+    name: str
+    price: float | None
+    ret_1d: float | None
+    ret_5d: float | None
+    ret_20d: float | None
+    sparkline: list[float]
+
+
+class SectorOut(BaseModel):
+    sector: str
+    n: int
+    ret_1d: float | None
+    ret_5d: float | None
+    ret_20d: float | None
+    members: list[str]
+
+
+class MoverOut(BaseModel):
+    symbol: str
+    name: str
+    sector: str | None
+    price: float | None
+    ret_1d: float | None
+    ret_5d: float | None
+    ret_20d: float | None
+    z_5d: float | None
+    sparkline: list[float]
+
+
+class MarketPageOut(BaseModel):
+    generated_at: datetime
+    session_date: str
+    is_open: bool
+    universe_size: int
+    scanned: int
+    indices: list[IndexOut]
+    sectors: list[SectorOut]
+    gainers_5d: list[MoverOut]
+    losers_5d: list[MoverOut]
+    unusual_5d: list[MoverOut]
+    highs_52w: list[MoverOut]
+    lows_52w: list[MoverOut]
+
+
+# ---------------------------------------------------------------- compare
+
+
+class CompareSeries(BaseModel):
+    symbol: str
+    name: str
+    rebased: list[float]          # first point = 100
+    last_price: float
+    return_pct: float
+    volatility_annual: float
+    max_drawdown: float
+    range_position_52w: float | None
+    avg_volume_20d: float | None
+    best_day: float | None
+    worst_day: float | None
+
+
+class CompareOut(BaseModel):
+    generated_at: datetime
+    sessions: int
+    dates: list[str]
+    series: list[CompareSeries]
+    correlation: list[list[float | None]]
+
+
+# -------------------------------------------------------------- news feed
+
+
+class NewsFeedItem(BaseModel):
+    symbol: str
+    name: str
+    title: str
+    url: str
+    source: str
+    published_at: datetime
+    is_new: bool
+
+
+class NewsFeedOut(BaseModel):
+    generated_at: datetime
+    symbols: list[str]
+    items: list[NewsFeedItem]

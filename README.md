@@ -20,7 +20,7 @@ The moment a visit starts, the briefing pops up as a summary — and on a first 
 
 ![What's new popup](docs/screenshot-whatsnew.png)
 
-Built end-to-end: FastAPI + SQLite backend, React/TypeScript frontend, real market data (Yahoo Finance, ~15 min delayed for NSE) with a deterministic simulated feed for tests and offline demos, and free news via Google News RSS. 35 backend tests. One container.
+Built end-to-end: FastAPI + SQLite backend, React/TypeScript frontend, real market data (Yahoo Finance, ~15 min delayed for NSE) with a deterministic simulated feed for tests and offline demos, and free news via Google News RSS. 37 backend tests. One container.
 
 ---
 
@@ -64,6 +64,15 @@ Everything else — auth, sync, resilience, scaling — exists to make those thr
 - **Acknowledge.** "Seen it ✓" resets the baseline for one stock; "Mark all seen" for the list.
 - **Honest about data.** Provider name and delay in the status strip; a banner if the primary feed is down and you're seeing fallback data; stale prices shown greyed, never hidden.
 - **Time-travel demo control.** "Pretend I last looked 3 sessions ago." The core feature is invisible to a first-time visitor (no history yet) — this makes it visible in one click.
+
+Three more pages, all built on data already in the database — no extra vendors, no API keys:
+
+- **News** — every headline for every stock you follow, the unseen ones first, filterable per stock. Same baseline as the briefing, so "new" means new *to you*.
+- **Compare** — 2–6 stocks on one chart, indexed to 100 so the lines are actually comparable, plus volatility, max drawdown, 52-week position, average volume, and a correlation matrix of daily moves.
+- **Market** — what moved across ~60 large NSE names: index tiles, sector performance, biggest gainers/losers, the *most unusual* moves (σ-ranked, not %-ranked), and 52-week breaches. Every row has "+ watch" to pull it onto your list.
+
+![Compare page](docs/screenshot-compare.png)
+![Market page](docs/screenshot-market.png)
 
 ## 3. Run it
 
@@ -211,19 +220,31 @@ Baselines are per user, not per session, so your phone knows what you saw on you
 - **The sparkline carries the baseline** as a dashed line, so "where was it when I looked" is visible without reading a number.
 - **Words before numbers.** An early tester (me, before I'd used a brokerage app) didn't know what "0.07σ" meant. Standard deviation is a statistics word, not a finance word. The detail panel now leads with *Ordinary* / *Notable* / *Rare* / *Extreme* and a sentence — "a normal day for this stock is about ±0.9%" — and keeps σ in brackets for those who want it. Volume, day range, open, previous close and 52-week range are what every brokerage app shows, so they stay, with hover definitions.
 
-### 5.4 State across sessions and devices
+### 5.4 Market-relative, sector-relative, and what I refused to add
+
+The single biggest confounder in "is this move meaningful?" is the market itself. §6 covers the mechanics; the product point is that a briefing which flags all twelve of your stocks on a red day is worse than useless. Nifty context turns "everything is down" into "everything is down *because the market is down*, except HAL, which went up."
+
+The Market page extends the same idea outward: sector aggregates answer "is this an IT problem or an Infosys problem", and the *most unusual moves* list ranks by σ rather than by percent, so it surfaces a 2.4σ move in a sleepy FMCG name over a routine 6% swing in a small-cap.
+
+**What I refused to build, and why it matters here:**
+
+- **"Investment opportunities" / buy ideas.** Recommending securities is a regulated activity (SEBI Research Analyst / Investment Adviser regulations). A hackathon project that says "these 5 stocks look attractive" is either fabricating an opinion it can't defend or quietly practising unlicensed advice. The Market page shows *what happened* and labels itself: "This page describes what prices did. It is not a recommendation." Discovery without advice is a real product; a screener that pretends to be a robo-adviser is not.
+- **An LLM chatbot for "ask about stocks."** It needs an API key nobody reviewing this repo has, it costs money per query, it can hallucinate a number the rest of the app got right from a real feed, and it dilutes the thesis. The deterministic explainer *is* the analysis: "2.2σ for this stock over 3 sessions, 2.9× normal volume, and here's the headline that landed in the same window." It works offline, costs nothing, and can be defended line by line.
+- **Fundamentals (P/E, EPS, margins) and earnings dates.** Genuinely relevant — these drive most large single-day moves — but not available from a keyless feed any more. Documented as a next step rather than half-faked.
+
+### 5.5 State across sessions and devices
 
 - **Server-side state, always.** Watchlists, baselines, levels, acknowledgements live in the database keyed by user. The client holds only a token (localStorage) and a visit id (sessionStorage). Sign in anywhere, same state.
 - **Passwordless auth** (email → 6-digit code → bearer token). The brief cares about identity across devices, not credential storage. Codes are single-use, hashed, expire in 10 minutes, and lock after 5 wrong attempts; tokens are 256-bit random and only their SHA-256 is stored. `send_code()` is the one-function seam for a real email provider; in dev the code is returned by the API.
 - **Sessions carry a device label** ("Chrome on Windows", "phone"), listed in the status strip. It makes the multi-device story visible rather than claimed.
 
-### 5.5 Concurrent edits (race conditions)
+### 5.6 Concurrent edits (race conditions)
 
 Two devices editing one watchlist is the concrete race the brief hints at. Every watchlist has a `version`. Writes may carry `If-Match: <version>`; the server bumps with a **conditional UPDATE** — `UPDATE watchlists SET version = version + 1 WHERE id = ? AND version = ?` — and checks the row count. Zero rows means someone else got there first: the client gets a **409 with the current state**, adopts it, tells the user, and lets them retry. No lost updates, no locks held across requests, identical on SQLite and Postgres.
 
 Adds and removes are idempotent, so a retried request after a network blip cannot double-add. Clients that omit `If-Match` get last-writer-wins, which is right for a single-device user.
 
-### 5.6 Stale, delayed and conflicting data
+### 5.7 Stale, delayed and conflicting data
 
 Every stored quote has two timestamps: `as_of` (the exchange time of the print) and `fetched_at` (when we received it). That distinction drives everything below.
 
@@ -237,10 +258,11 @@ Every stored quote has two timestamps: `as_of` (the exchange time of the print) 
 |Re-fetched history disagrees with stored bars (corrections)|Bars are upserted by `(symbol, date)`; a corrected close replaces, never duplicates.|
 |Very new listing / short history|σ falls back to a default and the card says *Limited price history — volatility estimate is a default*.|
 |Ticker renamed or delisted (Zomato → ETERNAL, Tata Motors → TMPV/TMCV in 2025)|A `SymbolNotFound` is *not* a provider failure: it does not trip the breaker and is never answered with fallback data (that would be made-up prices for a real ticker). Two consecutive misses mark the symbol unavailable, polling stops, and the row says so and suggests fixing the ticker. Old names people still type are aliased to the new ones in search.|
+|A stock falls 3% on a day Nifty fell 2.5%|Not news about the stock. The engine tracks `^NSEI` for every user, computes the index's move over *the same window as that user's baseline*, and demotes a move one tier when ≥70% of it is the market — with a reason chip saying so. A stock moving *against* the market gets promoted instead. Level crossings and 52-week breaches are stock-specific and never discounted.|
 |Yahoo's `chartPreviousClose`|Is the close before the *chart range*, not yesterday's. Day change is derived from the daily rows instead — a wrong "prev close" makes every day-change figure wrong.|
 |Same symbol wanted by the refresh loop, a sample-list warmup and an "add symbol" at once|An in-flight set per fetch kind: one request goes out, the others skip.|
 
-### 5.7 Why these technologies
+### 5.8 Why these technologies
 
 - **FastAPI + SQLAlchemy + SQLite (WAL).** One process, one file, zero setup for a reviewer; `SINCE_DATABASE_URL=postgresql+psycopg://…` is the only change for Postgres (driver included). Requires Python 3.10+. SQLAlchemy 2.0 typed models keep the schema readable.
 - **React + Vite + TypeScript, no UI framework.** ~900 lines of components, hand-written CSS. A component library would have cost more in bundle size and fighting defaults than it saved.
@@ -288,6 +310,7 @@ The rubric asks where to keep things simple. These were considered and cut on pu
 - **Real-time push.** 30-second polling is fine for a 15-minute-delayed feed; websockets would add a moving part to defend for no user-visible gain today.
 - **A message queue / Celery / Redis.** One asyncio loop with DB-backed state does the job for thousands of users; the migration path is documented above, not pre-built.
 - **Sentiment analysis on news.** No labelled data, unexplainable output, and a wrong "negative" tag is worse than no tag.
+- **Buy/sell ideas and an LLM chatbot.** Both were asked for; both were declined on purpose. See §5.4 — one is regulated advice, the other is an API key the reviewer doesn't have plus a hallucination risk on top of numbers the app otherwise gets right.
 - **Password auth, OAuth, email delivery.** The rubric is about state across devices; magic codes deliver that in 80 lines. The email seam is one function.
 - **Portfolio/P&L.** It's a watchlist. Holdings would double the data model for a feature the brief did not ask for.
 - **Per-user notification channels** (push, email digests). The *engine* for "what's worth telling you" is built; delivery is a product decision I'd validate before building.
@@ -296,7 +319,7 @@ The rubric asks where to keep things simple. These were considered and cut on pu
 ## 9. Testing
 
 ```
-cd backend && python -m pytest -q      # 35 tests, ~4s, no network
+cd backend && python -m pytest -q      # 37 tests, ~6s, no network
 ```
 
 |File|Covers|
@@ -324,6 +347,9 @@ All under `/api`. Auth via `Authorization: Bearer <token>`. Full OpenAPI at `/do
 |POST|`/watchlists/{id}/demo/rewind`|`{sessions: n}` — set baseline to the close n sessions ago|
 |GET/POST/DELETE|`/pins[/{symbol}]`|the always-watch set, across lists|
 |GET|`/pins/board`|pinned symbols scored like the briefing, in pin order|
+|GET|`/news?days=`|every headline across the user's symbols, flagged new vs. their baseline|
+|GET|`/compare?symbols=&sessions=`|rebased series, volatility, drawdown, correlation matrix|
+|GET|`/market`|indices, sector aggregates, movers, unusual moves, 52-week breaches|
 |GET/POST/DELETE|`/levels[/{id}]`|price levels with direction + note|
 |GET|`/symbols/search?q=`|universe search|
 |GET|`/health`|market state, provider breakers, scheduler liveness|
@@ -337,7 +363,8 @@ In the order I would do them:
 3. **Push delivery** of the briefing when something crosses into *Needs attention* while you're away — the engine already produces exactly the payload.
 4. **Postgres + multi-worker refresh** as described in §7, when symbol count × users makes one loop the bottleneck.
 5. **Earnings calendar** as a first-class event ("results on Thursday") — the one scheduled thing every watcher wants to know.
-6. **A real-time broker feed** (Zerodha Kite Connect, Groww API) behind the same `MarketDataProvider` interface — one new file — so the *Live* badge is earned rather than declared.
+6. **Sector-relative scoring inside the briefing.** The Market page computes sector aggregates already; feeding "IT fell 3% today" back into `assess()` would discount an Infosys move the same way Nifty does now. One function, needs a proper sector index rather than my equal-weighted proxy.
+7. **A real-time broker feed** (Zerodha Kite Connect, Groww API) behind the same `MarketDataProvider` interface — one new file — so the *Live* badge is earned rather than declared.
 
 ---
 

@@ -126,12 +126,13 @@ class MarketService:
 
         with session_scope() as db:
             tracked = self._tracked_symbols(db)
-            if not tracked:
+            if not tracked and not self.settings.universe_scan:
                 self.last_tick_at = now
                 return
             hot = self._hot_symbols(db, now)
-            quotes = {q.symbol: q for q in db.scalars(select(Quote).where(Quote.symbol.in_(tracked)))}
-            metas = {m.symbol: m for m in db.scalars(select(SymbolMeta).where(SymbolMeta.symbol.in_(tracked)))}
+            quotes = {q.symbol: q for q in db.scalars(select(Quote).where(Quote.symbol.in_(tracked)))} if tracked else {}
+            metas = {m.symbol: m for m in db.scalars(select(SymbolMeta).where(SymbolMeta.symbol.in_(tracked)))} if tracked else {}
+            metas_all = {m.symbol: m for m in db.scalars(select(SymbolMeta))}
 
             def skip(sym: str) -> bool:
                 m = metas.get(sym)
@@ -173,12 +174,29 @@ class MarketService:
                     if m is None or m.news_refreshed_at is None or (now - m.news_refreshed_at).total_seconds() >= mins * 60:
                         due_news.append(s)
 
+            # Universe scan: bars for names nobody watches yet, a few per tick.
+            due_scan: list[str] = []
+            if self.settings.universe_scan:
+                from .universe import UNIVERSE
+
+                tracked_set = set(tracked)
+                for info in UNIVERSE:
+                    if info.symbol in tracked_set:
+                        continue
+                    m = metas_all.get(info.symbol)
+                    if m is not None and m.unavailable:
+                        continue
+                    if m is None or m.bars_refreshed_at is None or (now - m.bars_refreshed_at).total_seconds() >= 20 * 3600:
+                        due_scan.append(info.symbol)
+                due_scan.sort(key=lambda s: not s.startswith("^"))   # indices first: the Market page leads with them
+
         if due_quotes:
             await self.refresh_quotes(due_quotes)
         # Bars and news are heavier; a bounded slice per tick, fetched concurrently
         # (the providers cap their own connection counts).
         await asyncio.gather(*(self.refresh_bars(s) for s in due_bars[:12]),
-                             *(self.refresh_news(s) for s in due_news[:8]))
+                             *(self.refresh_news(s) for s in due_news[:8]),
+                             *(self.refresh_bars(s) for s in due_scan[:4]))
         self.last_tick_at = now
 
     async def warm(self, symbols: list[str]) -> None:
@@ -314,7 +332,10 @@ class MarketService:
         a = db.scalars(select(distinct(WatchlistItem.symbol))).all()
         b = db.scalars(select(distinct(PriceLevel.symbol))).all()
         c = db.scalars(select(distinct(Pin.symbol))).all()
-        return sorted(set(a) | set(b) | set(c))
+        tracked = set(a) | set(b) | set(c)
+        if tracked:
+            tracked.add("^NSEI")   # the market itself, for market-relative context
+        return sorted(tracked)
 
     @staticmethod
     def _hot_symbols(db, now) -> set[str]:

@@ -15,6 +15,8 @@ Record with the offline demo (`make demo` or `SINCE_PROVIDER=simulated SINCE_NEW
 | 1:35 | Click **Seen it ✓** | "Acknowledge resets the baseline for that stock. Next time I come back, it diffs from here." |
 | 1:45 | Status strip | "Every price carries its freshness — Yahoo's NSE feed is 15 minutes delayed, and the app says so instead of pretending. If the feed dies, a circuit breaker fails over to a simulated feed and a banner tells you." |
 | 1:55 | (optional) open in a second tab / phone | "Same account on another device: same baselines, same acknowledgements. Edit the list on both at once and the loser gets a 409 and reloads — no lost updates." |
+| 1:50 | Click **Market** in the nav | "And a wider view: sectors this week, and the *most unusual* moves — ranked by how strange each move is for that stock, not by percent. Every row can be pulled onto the watchlist." |
+| 1:55 | Click **Compare** | "Two or three names on one chart, indexed to the same starting point, plus volatility and correlation — how much they actually move together." |
 | 2:00 | README | "Architecture, every decision and trade-off, 34 tests. Thanks." |
 
 ## Judge-facing one-liner (for the submission form)

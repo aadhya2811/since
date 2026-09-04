@@ -9,12 +9,13 @@ from sqlalchemy.orm import Session
 
 from .. import schemas
 from ..market import calendar as cal
-from ..market.store import get_bars_many, get_news_many, get_quotes
+from ..market.store import close_on_or_before, get_bars, get_bars_many, get_news_many, get_quotes
 from ..models import Pin, PriceLevel, Quote, SymbolMeta, User, Watchlist, WatchlistItem
 from . import baselines as bl
 from .significance import Bar, BaselineIn, LevelIn, QuoteIn, assess, describe_unusual, humanize_since
 
 TIER_ORDER = {"attention": 0, "notable": 1, "quiet": 2}
+MARKET_INDEX = "^NSEI"
 
 
 def freshness(q: Quote | None, now: datetime, state: cal.MarketState) -> schemas.Freshness:
@@ -150,6 +151,17 @@ def assess_symbols(db: Session, user: User, symbols: list[str], now: datetime, s
     first_visit = bool(symbols) and not baselines
     frac = cal.session_fraction_elapsed(now)
     news_by = get_news_many(db, symbols, since=now - timedelta(days=7))
+    # The market itself, for "how much of this move is just Nifty?"
+    index_q = db.get(Quote, MARKET_INDEX)
+    index_bars = get_bars(db, MARKET_INDEX, limit=80) if index_q else []
+
+    def market_change(baseline_as_of: datetime) -> float | None:
+        if index_q is None or not index_bars:
+            return None
+        ref = close_on_or_before(index_bars, cal._ist(baseline_as_of).date())
+        if ref is None or ref.close <= 0 or index_q.as_of <= baseline_as_of:
+            return None
+        return index_q.price / ref.close - 1
 
     items: list[schemas.BriefingItem] = []
     counts = {"attention": 0, "notable": 0, "quiet": 0}
@@ -189,6 +201,7 @@ def assess_symbols(db: Session, user: User, symbols: list[str], now: datetime, s
             bars, QuoteIn(q.price, q.as_of, q.prev_close, q.open, q.volume), b_in,
             [LevelIn(l.id, l.price, l.direction, l.note) for l in levels_by[sym]],
             now, market_open=state.is_open, session_fraction=frac,
+            market_change_pct=market_change(b_in.as_of) if sym != MARKET_INDEX else None,
         )
         u_label, u_text, u_window = describe_unusual(a.z, a.change_pct, a.sigma_daily, a.sessions, state.is_open, frac)
         if q.as_of > b_in.as_of:
@@ -215,7 +228,8 @@ def assess_symbols(db: Session, user: User, symbols: list[str], now: datetime, s
                                    seen_label=humanize_since(b_in.seen_at, now), change_abs=a.change_abs,
                                    change_pct=a.change_pct, sessions=a.sessions, z=a.z,
                                    unusual=schemas.UnusualOut(label=u_label, text=u_text, z=a.z, typical_move_pct=a.sigma_daily,
-                                                              typical_window_pct=u_window)),
+                                                              typical_window_pct=u_window),
+                                   market_change_pct=a.market_change_pct, market_share=a.market_share),
             reasons=[schemas.ReasonOut(kind=r.kind, severity=r.severity, text=r.text) for r in a.reasons],
             volume_ratio=a.volume_ratio, range_position_52w=a.range_position_52w, high_52w=a.high_52w,
             low_52w=a.low_52w, sigma_daily=a.sigma_daily, streak=a.streak, sparkline=spark, levels=lv_out,

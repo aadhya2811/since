@@ -89,6 +89,8 @@ class Assessment:
     reasons: list[Reason] = field(default_factory=list)
     levels_crossed: list[int] = field(default_factory=list)  # PriceLevel ids
     low_history: bool = False
+    market_change_pct: float | None = None   # index move over the same window
+    market_share: float | None = None        # fraction of this move explained by the market (0..1)
 
 
 # ----------------------------------------------------------------- helpers
@@ -199,6 +201,7 @@ def assess(
     *,
     market_open: bool,
     session_fraction: float,
+    market_change_pct: float | None = None,
 ) -> Assessment:
     reasons: list[Reason] = []
     sig, low_hist = sigma_daily(bars)
@@ -303,6 +306,22 @@ def assess(
     if abs(stk) >= 4:
         reasons.append(Reason("streak", "low", f"{abs(stk)} straight {'up' if stk > 0 else 'down'} sessions"))
 
+    # ---- 7. how much of this is just the market? -----------------------
+    # A stock down 3% on a day Nifty fell 2.5% is not news about the stock.
+    market_share: float | None = None
+    against_market = False
+    if market_change_pct is not None and not same_print and abs(change_pct) >= 0.005 and abs(market_change_pct) >= 0.005:
+        if (market_change_pct > 0) == (change_pct > 0):
+            market_share = max(0.0, min(1.0, market_change_pct / change_pct))
+            if market_share >= 0.6:
+                reasons.append(Reason("market", "low",
+                    f"Nifty 50 moved {fmt_pct(market_change_pct)} over the same period — "
+                    f"{'most' if market_share < 0.9 else 'nearly all'} of this is the market, not the stock"))
+        elif abs(market_change_pct) >= 0.01:
+            against_market = True
+            reasons.append(Reason("market", "medium",
+                f"Moved {'up' if change_pct > 0 else 'down'} while Nifty 50 went {fmt_pct(market_change_pct)} — against the market"))
+
     if low_hist:
         reasons.append(Reason("info", "low", "Limited price history — volatility estimate is a default"))
 
@@ -326,6 +345,13 @@ def assess(
         tier = "notable"
     else:
         tier = "quiet"
+    # A move that is mostly the whole market earns one notch less attention —
+    # unless something stock-specific (a level, a 52-week breach) also fired.
+    if market_share is not None and market_share >= 0.7 and not (crossed or at_high or at_low):
+        tier = {"attention": "notable", "notable": "quiet", "quiet": "quiet"}[tier]
+        score *= 0.6
+    if against_market and tier == "quiet" and az >= 0.7:
+        tier = "notable"
 
     return Assessment(
         tier=tier,
@@ -344,4 +370,6 @@ def assess(
         reasons=reasons,
         levels_crossed=crossed,
         low_history=low_hist,
+        market_change_pct=market_change_pct,
+        market_share=market_share,
     )
