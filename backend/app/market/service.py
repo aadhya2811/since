@@ -24,7 +24,7 @@ from ..db import session_scope
 from ..models import Pin, PriceLevel, Quote, SymbolMeta, User, Watchlist, WatchlistItem
 from ..util import utcnow
 from . import calendar as cal
-from .news import GoogleNewsProvider, NewsProvider, SimulatedNewsProvider
+from .news import HEADLINE_SYMBOLS, MARKET_TOPICS, GoogleNewsProvider, NewsProvider, SimulatedNewsProvider
 from .provider import MarketDataProvider, ProviderError, SymbolNotFound
 from .resilient import Breaker, ResilientProvider
 from .simulated import SimulatedProvider
@@ -166,11 +166,14 @@ class MarketService:
 
             due_news = []
             if self.news_chain:
-                for s in tracked:
-                    if skip(s):
+                # Market topics and the index heavyweights are refreshed whether
+                # or not anyone follows them: the News page needs them.
+                for s in list(dict.fromkeys(list(MARKET_TOPICS) + HEADLINE_SYMBOLS + list(tracked))):
+                    if s in tracked and skip(s):
                         continue
-                    m = metas.get(s)
-                    mins = self.settings.news_refresh_minutes * (1 if s in hot else 4)
+                    m = metas_all.get(s)
+                    always = s in MARKET_TOPICS or s in HEADLINE_SYMBOLS
+                    mins = self.settings.news_refresh_minutes * (1 if (s in hot or always) else 4)
                     if m is None or m.news_refreshed_at is None or (now - m.news_refreshed_at).total_seconds() >= mins * 60:
                         due_news.append(s)
 
@@ -281,7 +284,9 @@ class MarketService:
         try:
             with session_scope() as db:
                 meta = db.get(SymbolMeta, symbol)
-                company = meta.name if meta else (BY_SYMBOL[symbol].name if symbol in BY_SYMBOL else symbol)
+                company = (MARKET_TOPICS[symbol][0] if symbol in MARKET_TOPICS
+                   else (meta.name if meta and meta.name != symbol
+                         else (BY_SYMBOL[symbol].name if symbol in BY_SYMBOL else symbol)))
             return await self._fetch_news(symbol, company)
         finally:
             self._inflight["news"].discard(symbol)

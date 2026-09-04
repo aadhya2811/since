@@ -181,23 +181,76 @@ def build_compare(db: Session, symbols: list[str], sessions: int, now: datetime)
 # --------------------------------------------------------------------- news
 
 
-def build_news_feed(db: Session, user_id: int, now: datetime, days: int = 7) -> schemas.NewsFeedOut:
-    """Every headline for every symbol the user follows, newest first, flagged
-    'new' against that symbol's own baseline (what they last saw)."""
-    wl_syms = set(db.scalars(
-        select(WatchlistItem.symbol).join(Watchlist, Watchlist.id == WatchlistItem.watchlist_id).where(Watchlist.user_id == user_id)))
-    pin_syms = set(db.scalars(select(Pin.symbol).where(Pin.user_id == user_id)))
-    symbols = sorted(wl_syms | pin_syms)
-    if not symbols:
-        return schemas.NewsFeedOut(generated_at=now, symbols=[], items=[])
+def build_news_feed(db: Session, user_id: int, now: datetime, days: int = 7,
+                    scope: str = "all") -> schemas.NewsFeedOut:
+    """The news page.
+
+    Three kinds of story flow through one pipeline:
+      * `market`    — market-wide topics (Nifty/Sensex, RBI & SEBI, FII/DII
+                      flows, IPOs), stored under pseudo-symbols like ^MARKET
+      * `following` — a company on one of the user's watchlists or pins
+      * `bigcap`    — an index heavyweight the user doesn't follow
+
+    `scope` picks which of those to return. "new" is always measured against
+    that symbol's own baseline — the same clock the briefing uses — so a
+    headline is new because *you* haven't seen it, not because it is recent.
+    """
+    from ..market.news import HEADLINE_SYMBOLS, MARKET_TOPICS
+
+    followed = set(db.scalars(
+        select(WatchlistItem.symbol).join(Watchlist, Watchlist.id == WatchlistItem.watchlist_id)
+        .where(Watchlist.user_id == user_id)))
+    followed |= set(db.scalars(select(Pin.symbol).where(Pin.user_id == user_id)))
+    topics = list(MARKET_TOPICS)
+    bigcaps = [s for s in HEADLINE_SYMBOLS if s not in followed]
+
+    if scope == "following":
+        wanted = sorted(followed)
+    elif scope == "market":
+        wanted = topics + bigcaps
+    else:
+        wanted = topics + sorted(followed) + bigcaps
+    if not wanted:
+        return schemas.NewsFeedOut(generated_at=now, scope=scope, symbols=[], following=sorted(followed), items=[],
+                                   counts=schemas.NewsCounts(all=0, following=0, market=0, new=0))
+
     seen_at = {b.symbol: b.committed_seen_at for b in db.scalars(
-        select(Baseline).where(Baseline.user_id == user_id, Baseline.symbol.in_(symbols)))}
-    names = {m.symbol: m.name for m in db.scalars(select(SymbolMeta).where(SymbolMeta.symbol.in_(symbols)))}
+        select(Baseline).where(Baseline.user_id == user_id, Baseline.symbol.in_(wanted)))}
+    names = {m.symbol: m.name for m in db.scalars(select(SymbolMeta).where(SymbolMeta.symbol.in_(wanted)))}
     rows = db.scalars(
-        select(NewsItem).where(NewsItem.symbol.in_(symbols), NewsItem.published_at >= now - timedelta(days=days))
-        .order_by(NewsItem.published_at.desc()).limit(300)).all()
-    items = [schemas.NewsFeedItem(symbol=r.symbol, name=names.get(r.symbol, r.symbol), title=r.title, url=r.url,
-                                  source=r.source, published_at=r.published_at,
-                                  is_new=(r.symbol in seen_at and r.published_at > seen_at[r.symbol]))
-             for r in rows]
-    return schemas.NewsFeedOut(generated_at=now, symbols=symbols, items=items)
+        select(NewsItem).where(NewsItem.symbol.in_(wanted), NewsItem.published_at >= now - timedelta(days=days))
+        .order_by(NewsItem.published_at.desc()).limit(400)).all()
+
+    def kind(sym: str) -> str:
+        if sym in MARKET_TOPICS:
+            return "market"
+        return "following" if sym in followed else "bigcap"
+
+    def label(sym: str) -> str:
+        if sym in MARKET_TOPICS:
+            return MARKET_TOPICS[sym][0]
+        return names.get(sym) or (BY_SYMBOL[sym].name if sym in BY_SYMBOL else sym)
+
+    seen_titles: set[str] = set()
+    items: list[schemas.NewsFeedItem] = []
+    for r in rows:
+        key = r.title.lower()[:90]
+        if key in seen_titles:      # the same story often lands under two symbols
+            continue
+        seen_titles.add(key)
+        items.append(schemas.NewsFeedItem(
+            symbol=r.symbol, name=label(r.symbol), kind=kind(r.symbol), title=r.title, url=r.url,
+            source=r.source, published_at=r.published_at,
+            is_new=(r.symbol in seen_at and r.published_at > seen_at[r.symbol]),
+        ))
+
+    counts = schemas.NewsCounts(
+        all=len(items),
+        following=sum(1 for i in items if i.kind == "following"),
+        market=sum(1 for i in items if i.kind != "following"),
+        new=sum(1 for i in items if i.is_new),
+    )
+    # Symbols that actually produced a story, for the filter chips.
+    present = [s for s in wanted if any(i.symbol == s for i in items)]
+    return schemas.NewsFeedOut(generated_at=now, scope=scope, symbols=present, following=sorted(followed),
+                               items=items, counts=counts)

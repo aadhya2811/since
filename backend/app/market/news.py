@@ -14,6 +14,7 @@ from __future__ import annotations
 import asyncio
 import hashlib
 import logging
+import random
 import re
 import xml.etree.ElementTree as ET
 from abc import ABC, abstractmethod
@@ -52,8 +53,25 @@ class NewsProvider(ABC):
 _GN = "https://news.google.com/rss/search"
 _STRIP_SUFFIX = re.compile(r"\s+(Ltd|Limited|Industries|Company)\.?$", re.I)
 
+# Market-wide topics, stored as pseudo-symbols so they flow through exactly the
+# same fetch → store → diff pipeline as a company. A watchlist app whose news
+# page only knows about your twelve stocks isn't a news page.
+MARKET_TOPICS: dict[str, tuple[str, str]] = {
+    "^MARKET": ("Indian markets", '(Nifty OR Sensex) (market OR stocks OR rally OR selloff) when:3d'),
+    "^POLICY": ("Policy & macro", '(RBI OR SEBI OR "repo rate" OR inflation OR "GDP") India (markets OR stocks OR economy) when:7d'),
+    "^FLOWS": ("Money flows", '(FII OR DII OR "foreign investors" OR "mutual fund inflows") India equities when:7d'),
+    "^IPO": ("IPOs & listings", '(IPO OR listing OR "listed at") India NSE when:7d'),
+}
+
+# The names that move the index. Their news is fetched whether or not anyone
+# here follows them, so the market feed has substance on day one.
+HEADLINE_SYMBOLS = ["RELIANCE.NS", "TCS.NS", "HDFCBANK.NS", "INFY.NS", "ICICIBANK.NS",
+                    "BHARTIARTL.NS", "SBIN.NS", "LT.NS"]
+
 
 def _query_for(symbol: str, company: str) -> str:
+    if symbol in MARKET_TOPICS:
+        return MARKET_TOPICS[symbol][1]
     base = _STRIP_SUFFIX.sub("", company).strip()
     # "Eternal (Zomato)" → Zomato ; "One97 Communications (Paytm)" → Paytm
     m = re.search(r"\(([^)]+)\)", base)
@@ -137,9 +155,43 @@ _SCRIPTED: dict[str, list[tuple[int, int, int, str, str]]] = {
     ],
 }
 
-_GENERIC = [
-    (6, 11, 0, "{c} Q1 results in line with estimates; margin outlook steady", "Economic Times"),
-    (9, 16, 5, "{c} announces dividend, record date fixed", "Business Standard"),
+# Market-wide scripted headlines for the offline demo, so the News page has a
+# realistic lead story without network access.
+_SCRIPTED_MARKET: dict[str, list[tuple[int, int, int, str, str]]] = {
+    "^MARKET": [
+        (0, 15, 45, "Nifty ends lower for a second session as IT and banks drag; Sensex down 412 points", "Economic Times"),
+        (0, 9, 25, "Markets open cautious ahead of US inflation print; metals buck the trend", "Mint"),
+        (1, 16, 10, "Nifty snaps four-day winning run; broader market outperforms", "Business Standard"),
+        (2, 15, 55, "Sensex reclaims 82,000 as defence and renewables lead a broad rally", "Moneycontrol"),
+    ],
+    "^POLICY": [
+        (1, 11, 30, "RBI holds repo rate at 5.75%, flags food inflation as the key risk", "Reuters"),
+        (3, 14, 20, "SEBI tightens disclosure norms for related-party transactions", "The Hindu BusinessLine"),
+    ],
+    "^FLOWS": [
+        (0, 18, 5, "FIIs sell ₹3,240 crore of Indian equities; DIIs absorb most of it", "Economic Times"),
+        (2, 17, 40, "Equity mutual fund inflows stay above ₹40,000 crore for a fifth month", "Mint"),
+    ],
+    "^IPO": [
+        (1, 10, 15, "Two mainboard IPOs open next week; grey market premiums cool off", "Moneycontrol"),
+        (4, 12, 0, "Recent listings: three of five trade below issue price a month on", "Business Standard"),
+    ],
+}
+
+# A pool of plausible company stories. Each simulated company draws three of
+# them deterministically from its ticker, so an offline demo doesn't read like
+# the same sentence pasted twelve times.
+_GENERIC_POOL = [
+    (0, 12, 40, "{c} gains as brokerages nudge up target prices", "Moneycontrol"),
+    (0, 10, 15, "{c} slips despite in-line quarter; margin guidance in focus", "Economic Times"),
+    (0, 14, 5, "Volumes spike in {c} ahead of index rebalancing", "Mint"),
+    (1, 11, 30, "{c} board approves ₹1,200 crore capex plan", "Business Standard"),
+    (1, 15, 40, "{c}: promoter stake unchanged, FII holding up 40 bps", "CNBC-TV18"),
+    (2, 11, 0, "{c} results in line with estimates; margin outlook steady", "Economic Times"),
+    (2, 16, 20, "Analysts stay split on {c} after the quarter", "Reuters"),
+    (3, 9, 50, "{c} to add capacity at its southern plant", "The Hindu BusinessLine"),
+    (4, 13, 10, "What the last six months tell you about {c}", "Moneycontrol"),
+    (5, 16, 5, "{c} announces dividend, record date fixed", "Business Standard"),
 ]
 
 
@@ -155,10 +207,14 @@ class SimulatedNewsProvider(NewsProvider):
         now = utcnow()
         st = cal.market_state(now)
         last_completed = cal.previous_trading_day(st.session_date) if st.is_open else st.session_date
-        items = _SCRIPTED.get(symbol)
+        items = _SCRIPTED_MARKET.get(symbol) or _SCRIPTED.get(symbol)
+        if items is None and symbol in MARKET_TOPICS:
+            items = []
         if items is None:
             c = BY_SYMBOL[symbol].name if symbol in BY_SYMBOL else company
-            items = [(a, h, m, t.format(c=c), s) for a, h, m, t, s in _GENERIC]
+            rng = random.Random(int(hashlib.sha256(symbol.encode()).hexdigest()[:8], 16))
+            picked = rng.sample(_GENERIC_POOL, 3)
+            items = [(a, h, m, t.format(c=c), s) for a, h, m, t, s in picked]
         out = []
         for ago, hh, mm, title, source in items:
             d = last_completed

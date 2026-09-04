@@ -28,13 +28,16 @@ log = logging.getLogger(__name__)
 
 
 def ensure_symbol(db: Session, symbol: str, name: str | None = None) -> SymbolMeta:
+    from .news import MARKET_TOPICS
+
     meta = db.get(SymbolMeta, symbol)
     if meta is None:
         info = BY_SYMBOL.get(symbol)
+        topic = MARKET_TOPICS.get(symbol)
         meta = SymbolMeta(
             symbol=symbol,
-            name=name or (info.name if info else symbol),
-            sector=info.sector if info else None,
+            name=(topic[0] if topic else None) or name or (info.name if info else symbol),
+            sector="Market" if topic else (info.sector if info else None),
         )
         db.add(meta)
         db.flush()

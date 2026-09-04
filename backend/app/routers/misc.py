@@ -63,5 +63,7 @@ async def compare(request: Request, symbols: str = Query(..., description="comma
 
 
 @router.get("/news", response_model=schemas.NewsFeedOut)
-def news_feed(days: int = Query(7, ge=1, le=30), user: User = Depends(current_user), db: Session = Depends(get_db)):
-    return build_news_feed(db, user.id, utcnow(), days=days)
+def news_feed(days: int = Query(7, ge=1, le=30),
+              scope: str = Query("all", pattern="^(all|following|market)$"),
+              user: User = Depends(current_user), db: Session = Depends(get_db)):
+    return build_news_feed(db, user.id, utcnow(), days=days, scope=scope)

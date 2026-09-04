@@ -307,10 +307,47 @@ def test_market_compare_and_news_pages(client):
     assert len(m) == 3 and abs(m[0][0] - 1.0) < 1e-6 and m[0][1] == m[1][0]
     assert 0 < c["series"][0]["volatility_annual"] < 2
     # news feed covers watchlist + pinned symbols
-    n = client.get("/api/news", headers=h).json()
-    assert set(n["symbols"]) == {"TCS.NS", "TMPV.NS", "HAL.NS"}
+    n = client.get("/api/news?scope=following", headers=h).json()
+    assert set(n["symbols"]) <= {"TCS.NS", "TMPV.NS", "HAL.NS"}
     assert any(i["symbol"] == "TMPV.NS" and "JLR" in i["title"] for i in n["items"])
     # market page works even with a tiny scanned universe
     mk = client.get("/api/market", headers=h).json()
     assert mk["universe_size"] >= 50 and mk["scanned"] >= 2
     assert all("sector" in s for s in mk["sectors"])
+
+
+def test_news_scopes_market_wide_company_and_all(client):
+    """The news page is not just 'my twelve stocks': market topics and index
+    heavyweights are fetched whether or not the user follows them."""
+    import asyncio
+    from app.market.news import HEADLINE_SYMBOLS, MARKET_TOPICS
+
+    h = login(client)
+    wl = setup_list(client, h)                     # follows TCS + TMPV
+    loop = asyncio.new_event_loop()
+    for sym in list(MARKET_TOPICS) + HEADLINE_SYMBOLS:
+        loop.run_until_complete(client.market.refresh_news(sym))
+    loop.close()
+
+    mkt = client.get("/api/news?scope=market", headers=h).json()
+    assert mkt["scope"] == "market"
+    assert any(i["kind"] == "market" for i in mkt["items"])
+    assert any("Nifty" in i["title"] or "Sensex" in i["title"] for i in mkt["items"])
+    assert not any(i["kind"] == "following" for i in mkt["items"])
+    # An index heavyweight the user does NOT follow still shows up.
+    assert any(i["kind"] == "bigcap" for i in mkt["items"])
+
+    following = client.get("/api/news?scope=following", headers=h).json()
+    assert following["items"] and all(i["kind"] == "following" for i in following["items"])
+    assert set(following["following"]) == {"TCS.NS", "TMPV.NS"}
+
+    every = client.get("/api/news", headers=h).json()
+    kinds = {i["kind"] for i in every["items"]}
+    assert {"market", "following"} <= kinds
+    assert every["counts"]["all"] == len(every["items"])
+    assert every["counts"]["following"] + every["counts"]["market"] == every["counts"]["all"]
+    # Newest first, and the same story filed under two symbols appears once.
+    ts = [i["published_at"] for i in every["items"]]
+    assert ts == sorted(ts, reverse=True)
+    titles = [i["title"] for i in every["items"]]
+    assert len(titles) == len(set(titles))

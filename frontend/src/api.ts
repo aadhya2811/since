@@ -75,7 +75,7 @@ export const api = {
 
   market: () => req<MarketPage>('GET', '/api/market'),
   compare: (symbols: string[], sessions: number) => req<CompareOut>('GET', `/api/compare?symbols=${encodeURIComponent(symbols.join(','))}&sessions=${sessions}`),
-  news: (days = 7) => req<NewsFeed>('GET', `/api/news?days=${days}`),
+  news: (days = 7, scope: 'all' | 'following' | 'market' = 'all') => req<NewsFeed>('GET', `/api/news?days=${days}&scope=${scope}`),
 
   addLevel: (symbol: string, price: number, direction: 'above' | 'below', note: string | null) => req<Level>('POST', '/api/levels', { symbol, price, direction, note }),
   deleteLevel: (id: number) => req<void>('DELETE', `/api/levels/${id}`),

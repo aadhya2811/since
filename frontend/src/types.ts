@@ -49,5 +49,6 @@ export interface MarketPage {
 }
 export interface CompareSeries { symbol: string; name: string; rebased: number[]; last_price: number; return_pct: number; volatility_annual: number; max_drawdown: number; range_position_52w: number | null; avg_volume_20d: number | null; best_day: number | null; worst_day: number | null }
 export interface CompareOut { generated_at: string; sessions: number; dates: string[]; series: CompareSeries[]; correlation: (number | null)[][] }
-export interface NewsFeedItem { symbol: string; name: string; title: string; url: string; source: string; published_at: string; is_new: boolean }
-export interface NewsFeed { generated_at: string; symbols: string[]; items: NewsFeedItem[] }
+export interface NewsFeedItem { symbol: string; name: string; kind: 'market' | 'following' | 'bigcap'; title: string; url: string; source: string; published_at: string; is_new: boolean }
+export interface NewsCounts { all: number; following: number; market: number; new: number }
+export interface NewsFeed { generated_at: string; scope: string; symbols: string[]; following: string[]; counts: NewsCounts; items: NewsFeedItem[] }

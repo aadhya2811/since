@@ -20,7 +20,7 @@ The moment a visit starts, the briefing pops up as a summary — and on a first 
 
 ![What's new popup](docs/screenshot-whatsnew.png)
 
-Built end-to-end: FastAPI + SQLite backend, React/TypeScript frontend, real market data (Yahoo Finance, ~15 min delayed for NSE) with a deterministic simulated feed for tests and offline demos, and free news via Google News RSS. 37 backend tests. One container.
+Built end-to-end: FastAPI + SQLite backend, React/TypeScript frontend, real market data (Yahoo Finance, ~15 min delayed for NSE) with a deterministic simulated feed for tests and offline demos, and free news via Google News RSS. 38 backend tests. One container.
 
 ---
 
@@ -67,10 +67,11 @@ Everything else — auth, sync, resilience, scaling — exists to make those thr
 
 Three more pages, all built on data already in the database — no extra vendors, no API keys:
 
-- **News** — every headline for every stock you follow, the unseen ones first, filterable per stock. Same baseline as the briefing, so "new" means new *to you*.
+- **News** — a real news page, not a per-stock log. Three streams share one pipeline: **market-wide topics** (Nifty/Sensex, RBI & SEBI policy, FII/DII flows, IPOs) stored under pseudo-symbols like `^MARKET`; the **companies you follow**; and the **index heavyweights** you don't, fetched regardless so the feed has substance on day one. Filter with one control — Everything / My stocks / Market — then narrow to a single topic or ticker. "New" is measured against the same baseline the briefing uses, so a headline is new because *you* haven't seen it, not because it is recent. Lead story, card grid, publisher monograms (Google News RSS carries no images, so identity is typographic), and de-duplication when the same story files under two symbols.
 - **Compare** — 2–6 stocks on one chart, indexed to 100 so the lines are actually comparable, plus volatility, max drawdown, 52-week position, average volume, and a correlation matrix of daily moves.
 - **Market** — what moved across ~60 large NSE names: index tiles, sector performance, biggest gainers/losers, the *most unusual* moves (σ-ranked, not %-ranked), and 52-week breaches. Every row has "+ watch" to pull it onto your list.
 
+![News page](docs/screenshot-news.png)
 ![Compare page](docs/screenshot-compare.png)
 ![Market page](docs/screenshot-market.png)
 
@@ -319,7 +320,7 @@ The rubric asks where to keep things simple. These were considered and cut on pu
 ## 9. Testing
 
 ```
-cd backend && python -m pytest -q      # 37 tests, ~6s, no network
+cd backend && python -m pytest -q      # 38 tests, ~6s, no network
 ```
 
 |File|Covers|
@@ -347,7 +348,7 @@ All under `/api`. Auth via `Authorization: Bearer <token>`. Full OpenAPI at `/do
 |POST|`/watchlists/{id}/demo/rewind`|`{sessions: n}` — set baseline to the close n sessions ago|
 |GET/POST/DELETE|`/pins[/{symbol}]`|the always-watch set, across lists|
 |GET|`/pins/board`|pinned symbols scored like the briefing, in pin order|
-|GET|`/news?days=`|every headline across the user's symbols, flagged new vs. their baseline|
+|GET|`/news?days=&scope=`|scope: `all` / `following` / `market`; each item tagged market / following / bigcap, flagged new vs. that symbol's baseline|
 |GET|`/compare?symbols=&sessions=`|rebased series, volatility, drawdown, correlation matrix|
 |GET|`/market`|indices, sector aggregates, movers, unusual moves, 52-week breaches|
 |GET/POST/DELETE|`/levels[/{id}]`|price levels with direction + note|

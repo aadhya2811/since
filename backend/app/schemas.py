@@ -330,6 +330,7 @@ class CompareOut(BaseModel):
 class NewsFeedItem(BaseModel):
     symbol: str
     name: str
+    kind: str            # market | following | bigcap
     title: str
     url: str
     source: str
@@ -337,7 +338,17 @@ class NewsFeedItem(BaseModel):
     is_new: bool
 
 
+class NewsCounts(BaseModel):
+    all: int
+    following: int
+    market: int
+    new: int
+
+
 class NewsFeedOut(BaseModel):
     generated_at: datetime
+    scope: str
     symbols: list[str]
+    following: list[str]
+    counts: NewsCounts
     items: list[NewsFeedItem]
