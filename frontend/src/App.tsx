@@ -139,14 +139,17 @@ function Main({ user, onLogout }: { user: User; onLogout: () => void }) {
   })
 
   return (
-    <div className="shell">
-      <header className="topbar">
+    <>
+    <header className="topbar">
+      <div className="topbar-inner">
         <div className="brand"><h1>Since<span>.</span></h1><span className="tag">what changed since you last looked</span></div>
         <div className="topbar-right">
           <span className="muted small">{user.email}</span>
           <button className="btn ghost sm" onClick={onLogout}>Sign out</button>
         </div>
-      </header>
+      </div>
+    </header>
+    <div className="shell">
 
       {briefing && (
         <div className="strip">
@@ -161,7 +164,7 @@ function Main({ user, onLogout }: { user: User; onLogout: () => void }) {
       {briefing?.data.note && <div className="banner">{briefing.data.note}</div>}
       {error && <div className="banner">{error}</div>}
 
-      {lists && (
+      {lists && lists.length > 0 && (
         <div className="tabs">
           {lists.map(l => <button key={l.id} className={`tab ${l.id === activeId ? 'active' : ''}`} onClick={() => setActiveId(l.id)}>{l.name} <span className="faint">{l.items.length}</span></button>)}
           <button className="tab" onClick={async () => { const n = prompt('Name the watchlist'); if (n) { const wl = await api.createWatchlist(n); await loadLists(); setActiveId(wl.id) } }}>+ New</button>
@@ -170,9 +173,10 @@ function Main({ user, onLogout }: { user: User; onLogout: () => void }) {
       )}
 
       {lists && lists.length === 0 && (
-        <div className="empty">
-          <h3>No watchlist yet</h3>
-          <p>Start with a sample of 12 NSE stocks (with a few days of history so you can see the briefing work), or build your own.</p>
+        <div className="hero">
+          <div className="eyebrow">Welcome</div>
+          <h2>Your watchlist,<br />as a briefing.</h2>
+          <p>Since remembers what you saw. Come back and it tells you what changed — and only flags the moves that are unusual <em>for that stock</em>.</p>
           <button className="btn primary" disabled={busy} onClick={async () => {
             setBusy(true)
             try { const wl = await api.createSample(); await loadLists(); setActiveId(wl.id) } catch (e) { show((e as Error).message, true) } finally { setBusy(false) }
@@ -241,5 +245,6 @@ function Main({ user, onLogout }: { user: User; onLogout: () => void }) {
       )}
       {toast && <div className={`toast ${toast.warn ? 'warn' : ''}`}>{toast.text}</div>}
     </div>
+    </>
   )
 }
