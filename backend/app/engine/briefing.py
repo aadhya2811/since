@@ -10,9 +10,9 @@ from sqlalchemy.orm import Session
 from .. import schemas
 from ..market import calendar as cal
 from ..market.store import get_bars_many, get_news_many, get_quotes
-from ..models import PriceLevel, Quote, SymbolMeta, User, Watchlist
+from ..models import Pin, PriceLevel, Quote, SymbolMeta, User, Watchlist, WatchlistItem
 from . import baselines as bl
-from .significance import Bar, BaselineIn, LevelIn, QuoteIn, assess, humanize_since
+from .significance import Bar, BaselineIn, LevelIn, QuoteIn, assess, describe_unusual, humanize_since
 
 TIER_ORDER = {"attention": 0, "notable": 1, "quiet": 2}
 
@@ -94,90 +94,8 @@ def build_briefing(
 ) -> schemas.BriefingOut:
     state = cal.market_state(now)
     new_visit = bl.touch_visit(db, user, visit_id, now, idle_minutes)
-
     symbols = [it.symbol for it in wl.items]
-    quotes = get_quotes(db, symbols)
-    bars_by = get_bars_many(db, symbols, limit=260)
-    metas = {m.symbol: m for m in db.scalars(select(SymbolMeta).where(SymbolMeta.symbol.in_(symbols)))} if symbols else {}
-    levels_by: dict[str, list[PriceLevel]] = {s: [] for s in symbols}
-    if symbols:
-        for lv in db.scalars(select(PriceLevel).where(PriceLevel.user_id == user.id, PriceLevel.symbol.in_(symbols))):
-            levels_by[lv.symbol].append(lv)
-    baselines = bl.get_baselines(db, user.id, symbols)
-    first_visit = bool(symbols) and not baselines
-    frac = cal.session_fraction_elapsed(now)
-    news_by = get_news_many(db, symbols, since=now - timedelta(days=7))
-
-    items: list[schemas.BriefingItem] = []
-    counts = {"attention": 0, "notable": 0, "quiet": 0}
-    missing = 0
-    any_change = False
-
-    for it in wl.items:
-        meta = metas.get(it.symbol)
-        name = meta.name if meta else it.symbol
-        sector = meta.sector if meta else None
-        q = quotes.get(it.symbol)
-        bars = [Bar(b.date, b.close, b.high, b.low, b.volume) for b in bars_by.get(it.symbol, [])]
-        spark = [b.close for b in bars[-30:]]
-        lv_out = [schemas.LevelOut(id=l.id, symbol=l.symbol, price=l.price, direction=l.direction, note=l.note,
-                                   created_at=l.created_at) for l in levels_by[it.symbol]]
-
-        if q is None:
-            missing += 1
-            if meta is not None and meta.unavailable:
-                why = schemas.ReasonOut(kind="error", severity="high",
-                                        text=f"Not available on the {meta.unavailable_reason.split()[-1] if meta.unavailable_reason else 'data'} feed — "
-                                             "the ticker may be renamed or delisted. Remove it or add the new symbol.")
-            else:
-                why = schemas.ReasonOut(kind="info", severity="low", text="Waiting for first quote…")
-            items.append(schemas.BriefingItem(
-                symbol=it.symbol, name=name, sector=sector, tier="quiet", score=0, quote=None, since=None,
-                reasons=[why],
-                volume_ratio=None, range_position_52w=None, high_52w=None, low_52w=None, sigma_daily=None,
-                streak=0, sparkline=spark, levels=lv_out, levels_crossed=[],
-                news=schemas.NewsSummary(new_count=0, items=[])))
-            continue
-
-        base = bl.record_seen(db, user.id, it.symbol, q, now, baselines.get(it.symbol))
-        b_in = BaselineIn(price=base.committed_price, as_of=base.committed_as_of, seen_at=base.committed_seen_at)
-        a = assess(
-            bars, QuoteIn(q.price, q.as_of, q.prev_close, q.open, q.volume), b_in,
-            [LevelIn(l.id, l.price, l.direction, l.note) for l in levels_by[it.symbol]],
-            now, market_open=state.is_open, session_fraction=frac,
-        )
-        if q.as_of > b_in.as_of:
-            any_change = True
-
-        # ---- news: what was published after they last looked ------------
-        news_items = news_by.get(it.symbol, [])
-        news_out = [schemas.NewsOut(title=n.title, url=n.url, source=n.source, published_at=n.published_at,
-                                    is_new=n.published_at > b_in.seen_at) for n in news_items[:6]]
-        new_news = [n for n in news_out if n.is_new]
-        tier, reasons = apply_news(a.tier, a.reasons, new_news)
-        if tier != a.tier:
-            a.tier = tier
-        a.reasons = reasons
-        if new_news:
-            a.score += min(1.0, 0.25 * len(new_news))
-        counts[a.tier] += 1
-        items.append(schemas.BriefingItem(
-            symbol=it.symbol, name=name, sector=sector, tier=a.tier, score=a.score,
-            quote=schemas.QuoteOut(price=q.price, prev_close=q.prev_close, open=q.open, day_high=q.day_high,
-                                   day_low=q.day_low, volume=q.volume, day_change_pct=a.day_change_pct,
-                                   freshness=freshness(q, now, state)),
-            since=schemas.SinceOut(baseline_price=b_in.price, baseline_as_of=b_in.as_of, seen_at=b_in.seen_at,
-                                   seen_label=humanize_since(b_in.seen_at, now), change_abs=a.change_abs,
-                                   change_pct=a.change_pct, sessions=a.sessions, z=a.z),
-            reasons=[schemas.ReasonOut(kind=r.kind, severity=r.severity, text=r.text) for r in a.reasons],
-            volume_ratio=a.volume_ratio, range_position_52w=a.range_position_52w, high_52w=a.high_52w,
-            low_52w=a.low_52w, sigma_daily=a.sigma_daily, streak=a.streak, sparkline=spark, levels=lv_out,
-            levels_crossed=a.levels_crossed,
-            news=schemas.NewsSummary(new_count=len(new_news), items=news_out),
-        ))
-
-    # Attention first, then by score; quiet ones keep the user's own order.
-    items.sort(key=lambda i: (TIER_ORDER[i.tier], -i.score if i.tier != "quiet" else 0))
+    items, counts, missing, any_change, first_visit = assess_symbols(db, user, symbols, now, state)
 
     note = None
     if data_status.get("degraded"):
@@ -197,3 +115,115 @@ def build_briefing(
                                                           missing, new_visit, any_change)),
         items=items,
     )
+
+
+def build_board(db: Session, user: User, now: datetime) -> schemas.BoardOut:
+    """The pinned strip: the user's always-watch symbols across every list,
+    scored exactly like the briefing. Looking at the tile counts as seeing."""
+    state = cal.market_state(now)
+    pins = db.scalars(select(Pin).where(Pin.user_id == user.id).order_by(Pin.position, Pin.id)).all()
+    items, *_ = assess_symbols(db, user, [p.symbol for p in pins], now, state, keep_order=True)
+    return schemas.BoardOut(generated_at=now, items=items)
+
+
+def assess_symbols(db: Session, user: User, symbols: list[str], now: datetime, state: cal.MarketState,
+                   *, keep_order: bool = False):
+    pinned = set(db.scalars(select(Pin.symbol).where(Pin.user_id == user.id)))
+    # Which watchlist a symbol lives in (first match) — lets a pinned tile jump to its card.
+    home: dict[str, int] = {}
+    if symbols:
+        for wid, sym in db.execute(
+            select(WatchlistItem.watchlist_id, WatchlistItem.symbol)
+            .join(Watchlist, Watchlist.id == WatchlistItem.watchlist_id)
+            .where(Watchlist.user_id == user.id, WatchlistItem.symbol.in_(symbols))
+            .order_by(WatchlistItem.watchlist_id)
+        ):
+            home.setdefault(sym, wid)
+    quotes = get_quotes(db, symbols)
+    bars_by = get_bars_many(db, symbols, limit=260)
+    metas = {m.symbol: m for m in db.scalars(select(SymbolMeta).where(SymbolMeta.symbol.in_(symbols)))} if symbols else {}
+    levels_by: dict[str, list[PriceLevel]] = {s: [] for s in symbols}
+    if symbols:
+        for lv in db.scalars(select(PriceLevel).where(PriceLevel.user_id == user.id, PriceLevel.symbol.in_(symbols))):
+            levels_by[lv.symbol].append(lv)
+    baselines = bl.get_baselines(db, user.id, symbols)
+    first_visit = bool(symbols) and not baselines
+    frac = cal.session_fraction_elapsed(now)
+    news_by = get_news_many(db, symbols, since=now - timedelta(days=7))
+
+    items: list[schemas.BriefingItem] = []
+    counts = {"attention": 0, "notable": 0, "quiet": 0}
+    missing = 0
+    any_change = False
+
+    for sym in symbols:
+        meta = metas.get(sym)
+        name = meta.name if meta else sym
+        sector = meta.sector if meta else None
+        q = quotes.get(sym)
+        bars = [Bar(b.date, b.close, b.high, b.low, b.volume) for b in bars_by.get(sym, [])]
+        spark = [b.close for b in bars[-30:]]
+        lv_out = [schemas.LevelOut(id=l.id, symbol=l.symbol, price=l.price, direction=l.direction, note=l.note,
+                                   created_at=l.created_at) for l in levels_by[sym]]
+        common = dict(symbol=sym, name=name, sector=sector, pinned=sym in pinned, watchlist_id=home.get(sym))
+
+        if q is None:
+            missing += 1
+            if meta is not None and meta.unavailable:
+                why = schemas.ReasonOut(kind="error", severity="high",
+                                        text=f"Not available on the {meta.unavailable_reason.split()[-1] if meta.unavailable_reason else 'data'} feed — "
+                                             "the ticker may be renamed or delisted. Remove it or add the new symbol.")
+            else:
+                why = schemas.ReasonOut(kind="info", severity="low", text="Waiting for first quote…")
+            items.append(schemas.BriefingItem(
+                **common, tier="quiet", score=0, quote=None, since=None,
+                reasons=[why],
+                volume_ratio=None, range_position_52w=None, high_52w=None, low_52w=None, sigma_daily=None,
+                streak=0, sparkline=spark, levels=lv_out, levels_crossed=[],
+                news=schemas.NewsSummary(new_count=0, items=[])))
+            continue
+
+        base = bl.record_seen(db, user.id, sym, q, now, baselines.get(sym))
+        b_in = BaselineIn(price=base.committed_price, as_of=base.committed_as_of, seen_at=base.committed_seen_at)
+        a = assess(
+            bars, QuoteIn(q.price, q.as_of, q.prev_close, q.open, q.volume), b_in,
+            [LevelIn(l.id, l.price, l.direction, l.note) for l in levels_by[sym]],
+            now, market_open=state.is_open, session_fraction=frac,
+        )
+        u_label, u_text, u_window = describe_unusual(a.z, a.change_pct, a.sigma_daily, a.sessions, state.is_open, frac)
+        if q.as_of > b_in.as_of:
+            any_change = True
+
+        # ---- news: what was published after they last looked ------------
+        news_items = news_by.get(sym, [])
+        news_out = [schemas.NewsOut(title=n.title, url=n.url, source=n.source, published_at=n.published_at,
+                                    is_new=n.published_at > b_in.seen_at) for n in news_items[:6]]
+        new_news = [n for n in news_out if n.is_new]
+        tier, reasons = apply_news(a.tier, a.reasons, new_news)
+        if tier != a.tier:
+            a.tier = tier
+        a.reasons = reasons
+        if new_news:
+            a.score += min(1.0, 0.25 * len(new_news))
+        counts[a.tier] += 1
+        items.append(schemas.BriefingItem(
+            **common, tier=a.tier, score=a.score,
+            quote=schemas.QuoteOut(price=q.price, prev_close=q.prev_close, open=q.open, day_high=q.day_high,
+                                   day_low=q.day_low, volume=q.volume, day_change_pct=a.day_change_pct,
+                                   freshness=freshness(q, now, state)),
+            since=schemas.SinceOut(baseline_price=b_in.price, baseline_as_of=b_in.as_of, seen_at=b_in.seen_at,
+                                   seen_label=humanize_since(b_in.seen_at, now), change_abs=a.change_abs,
+                                   change_pct=a.change_pct, sessions=a.sessions, z=a.z,
+                                   unusual=schemas.UnusualOut(label=u_label, text=u_text, z=a.z, typical_move_pct=a.sigma_daily,
+                                                              typical_window_pct=u_window)),
+            reasons=[schemas.ReasonOut(kind=r.kind, severity=r.severity, text=r.text) for r in a.reasons],
+            volume_ratio=a.volume_ratio, range_position_52w=a.range_position_52w, high_52w=a.high_52w,
+            low_52w=a.low_52w, sigma_daily=a.sigma_daily, streak=a.streak, sparkline=spark, levels=lv_out,
+            levels_crossed=a.levels_crossed,
+            news=schemas.NewsSummary(new_count=len(new_news), items=news_out),
+        ))
+
+    # Attention first, then by score; quiet ones keep the user's own order.
+    if not keep_order:
+        items.sort(key=lambda i: (TIER_ORDER[i.tier], -i.score if i.tier != "quiet" else 0))
+    return items, counts, missing, any_change, first_visit

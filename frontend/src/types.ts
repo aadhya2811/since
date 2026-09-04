@@ -8,9 +8,10 @@ export interface QuoteOut {
   price: number; prev_close: number | null; open: number | null; day_high: number | null; day_low: number | null
   volume: number | null; day_change_pct: number | null; freshness: Freshness
 }
+export interface Unusual { label: 'Unchanged' | 'Ordinary' | 'Notable' | 'Rare' | 'Extreme'; text: string; z: number | null; typical_move_pct: number; typical_window_pct: number | null }
 export interface SinceOut {
   baseline_price: number; baseline_as_of: string; seen_at: string; seen_label: string
-  change_abs: number; change_pct: number; sessions: number; z: number | null
+  change_abs: number; change_pct: number; sessions: number; z: number | null; unusual: Unusual
 }
 export interface Reason { kind: string; severity: 'high' | 'medium' | 'low'; text: string }
 export interface Level { id: number; symbol: string; price: number; direction: 'above' | 'below'; note: string | null; created_at: string }
@@ -19,7 +20,7 @@ export interface NewsOut { title: string; url: string; source: string; published
 export type Tier = 'attention' | 'notable' | 'quiet'
 
 export interface BriefingItem {
-  symbol: string; name: string; sector: string | null; tier: Tier; score: number
+  symbol: string; pinned: boolean; watchlist_id: number | null; name: string; sector: string | null; tier: Tier; score: number
   quote: QuoteOut | null; since: SinceOut | null; reasons: Reason[]
   volume_ratio: number | null; range_position_52w: number | null; high_52w: number | null; low_52w: number | null
   sigma_daily: number | null; streak: number; sparkline: number[]; levels: Level[]; levels_crossed: number[]
@@ -34,5 +35,7 @@ export interface Briefing {
   items: BriefingItem[]
 }
 
+export interface PinOut { id: number; symbol: string; position: number }
+export interface Board { generated_at: string; items: BriefingItem[] }
 export interface SymbolHit { symbol: string; name: string; sector: string | null }
 export interface SessionOut { id: number; device_label: string; created_at: string; last_seen_at: string; current: boolean }

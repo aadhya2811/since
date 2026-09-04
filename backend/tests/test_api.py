@@ -271,3 +271,22 @@ def test_vendor_declared_delay_beats_live_label(client):
     else:
         assert f["status"] in ("closed", "stale")
     assert f["delay_minutes"] == 15
+
+
+def test_pins_form_a_cross_watchlist_board(client):
+    h = login(client)
+    wl = setup_list(client, h)
+    other = client.post("/api/watchlists", json={"name": "Other"}, headers=h).json()
+    client.post(f"/api/watchlists/{other['id']}/items", json={"symbol": "HAL"}, headers=h)
+    assert client.post("/api/pins", json={"symbol": "hal"}, headers=h).status_code == 201
+    client.post("/api/pins", json={"symbol": "TCS.NS"}, headers=h)
+    client.post("/api/pins", json={"symbol": "TCS.NS"}, headers=h)   # idempotent
+    board = client.get("/api/pins/board", headers=h).json()
+    assert [i["symbol"] for i in board["items"]] == ["HAL.NS", "TCS.NS"]   # pin order, not tier order
+    assert board["items"][0]["watchlist_id"] == other["id"]                # knows where to jump
+    assert all(i["pinned"] for i in board["items"])
+    assert board["items"][1]["since"]["unusual"]["label"] in ("Unchanged", "Ordinary")
+    b = brief(client, h, wl["id"])
+    assert next(i for i in b["items"] if i["symbol"] == "TCS.NS")["pinned"]
+    client.delete("/api/pins/HAL.NS", headers=h)
+    assert [i["symbol"] for i in client.get("/api/pins/board", headers=h).json()["items"]] == ["TCS.NS"]

@@ -97,6 +97,18 @@ class WatchlistItem(Base):
     watchlist: Mapped[Watchlist] = relationship(back_populates="items")
 
 
+class Pin(Base):
+    """A symbol the user always wants on the top strip, across watchlists."""
+
+    __tablename__ = "pins"
+    __table_args__ = (UniqueConstraint("user_id", "symbol", name="uq_pin"),)
+    id: Mapped[int] = mapped_column(primary_key=True)
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), index=True)
+    symbol: Mapped[str] = mapped_column(String(32))
+    position: Mapped[int] = mapped_column(Integer, default=0)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
+
+
 class PriceLevel(Base):
     """A price the user cares about ("tell me if TCS goes under 3400")."""
 

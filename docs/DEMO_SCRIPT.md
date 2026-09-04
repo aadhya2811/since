@@ -11,6 +11,7 @@ Record with the offline demo (`make demo` or `SINCE_PROVIDER=simulated SINCE_NEW
 | 0:50 | Point at INDUSINDBK card | "Down 7.6% since Tuesday — and it tells me that's a 2.3σ move *for this stock* over 3 sessions, on 2.2× normal volume, four straight down days, and here's the headline that probably explains it. Every flag has its evidence inline." |
 | 1:05 | Point at Suzlon vs a quiet one | "Suzlon is up 11% but that's only 1.7σ — it's a volatile name. Meanwhile a 2.5% drop in Hindustan Unilever scores 1.7σ too. Same σ, very different percentages. Fixed thresholds get this wrong." |
 | 1:20 | Expand a card | "Detail: what I last saw and when, how unusual, 52-week range, news diffed against the same baseline, and price levels I set — 'tell me if it falls below 3,400'." Set a level. |
+| 1:30 | Click **☆ pin** on two stocks | "Pin anything you always want visible — a tiny dashboard at the top, across all my lists. Click a tile, it jumps to the card." |
 | 1:35 | Click **Seen it ✓** | "Acknowledge resets the baseline for that stock. Next time I come back, it diffs from here." |
 | 1:45 | Status strip | "Every price carries its freshness — Yahoo's NSE feed is 15 minutes delayed, and the app says so instead of pretending. If the feed dies, a circuit breaker fails over to a simulated feed and a banner tells you." |
 | 1:55 | (optional) open in a second tab / phone | "Same account on another device: same baselines, same acknowledgements. Edit the list on both at once and the loser gets a 409 and reloads — no lost updates." |

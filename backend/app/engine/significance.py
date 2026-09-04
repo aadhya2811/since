@@ -145,6 +145,25 @@ def fmt_pct(x: float, signed: bool = True) -> str:
     return s
 
 
+def describe_unusual(z: float | None, change_pct: float, sig: float, sessions: int, market_open: bool,
+                     session_fraction: float) -> tuple[str, str, float | None]:
+    """The z-score in words. σ means nothing to most people; 'a normal day for
+    this stock is about ±0.9%' does."""
+    n_eff = max(sessions, 1)
+    if market_open and sessions >= 1:
+        n_eff = sessions - 1 + max(0.25, session_fraction)
+    window = sig * math.sqrt(n_eff)
+    span = "a normal day" if sessions <= 1 else f"a normal {sessions}-session stretch"
+    if z is None or abs(change_pct) < 0.0005:
+        return "Unchanged", f"No real move. {span[0].upper() + span[1:]} for this stock is about ±{fmt_pct(sig if sessions <= 1 else window, signed=False)}.", None
+    az = abs(z)
+    label = "Ordinary" if az < 1 else "Notable" if az < 2 else "Rare" if az < 3 else "Extreme"
+    verb = {"Ordinary": "well within", "Notable": "at the edge of", "Rare": "well outside", "Extreme": "far outside"}[label]
+    text = (f"Moved {fmt_pct(change_pct, signed=False)} — {verb} its usual range. "
+            f"{span[0].upper() + span[1:]} for this stock is about ±{fmt_pct(window, signed=False)}.")
+    return label, text, window
+
+
 def humanize_since(seen_at: datetime, now: datetime) -> str:
     delta = now - seen_at
     mins = delta.total_seconds() / 60

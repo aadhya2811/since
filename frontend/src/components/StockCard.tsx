@@ -11,6 +11,19 @@ interface Props {
   onRemove: (symbol: string) => Promise<void>
   onAddLevel: (symbol: string, price: number, direction: 'above' | 'below', note: string | null) => Promise<void>
   onDeleteLevel: (id: number) => Promise<void>
+  onTogglePin: (symbol: string, pinned: boolean) => Promise<void>
+  anchorId?: string
+}
+
+/** One-line definitions, shown on hover — for people who haven't used a brokerage app. */
+const HELP = {
+  saw: 'The price when you last opened Since. Everything in this card is measured from here — not from yesterday\'s close.',
+  now: 'Current price and how much it moved since you last looked. A "session" is one trading day (NSE: 9:15–15:30 IST).',
+  unusual: 'How big this move is compared with what THIS stock normally does. A quiet blue-chip and a volatile small-cap have very different "normal".',
+  volume: 'Shares traded today. L = lakh (1,00,000). "× normal" compares with the average of the last 20 sessions, adjusted for how much of today has traded.',
+  range: 'Lowest and highest price today. Open = first price at 9:15. Prev close = yesterday\'s final price; "% today" is measured from it.',
+  data: 'Where this price came from and how fresh it is. Free feeds are usually ~15 min behind the exchange.',
+  week52: 'Lowest and highest price over the past year, and where today sits between them.',
 }
 
 const ticker = (s: string) => s.replace(/\.NS$/, '').replace(/^\^/, '')
@@ -32,11 +45,13 @@ export function StockCard(p: Props) {
   const primary = item.reasons.filter(r => r.kind !== 'info' || item.reasons.length === 1)
 
   return (
-    <div className={`card ${item.tier} ${dir === 'up' ? 'pos' : ''}`}>
+    <div className={`card ${item.tier} ${dir === 'up' ? 'pos' : ''}`} id={p.anchorId}>
       <div className="card-main" onClick={p.onToggle}>
         <div className="sym">
           <div className="ticker">
             {ticker(item.symbol)}
+            <button className={`pinbtn ${item.pinned ? 'on' : ''}`} title={item.pinned ? 'Unpin from the top strip' : 'Pin to the top strip'}
+                    onClick={e => { e.stopPropagation(); p.onTogglePin(item.symbol, !item.pinned) }}>{item.pinned ? '★ pinned' : '☆ pin'}</button>
             {q && <span className={`badge ${q.freshness.status}`}>{q.freshness.label}</span>}
             {item.news.new_count > 0 && <span className="badge new">{item.news.new_count} new {item.news.new_count === 1 ? 'headline' : 'headlines'}</span>}
           </div>
@@ -68,18 +83,23 @@ export function StockCard(p: Props) {
       {p.expanded && q && s && (
         <div className="detail" onClick={e => e.stopPropagation()}>
           <div>
-            <h4>Since you looked</h4>
+            <h4>Since you looked <span className="faint" style={{ fontWeight: 400, letterSpacing: 0, textTransform: 'none' }}>· hover a label for what it means</span></h4>
             <div className="kv">
-              <span className="k">You last saw</span><span className="num">{inr(s.baseline_price)} <span className="faint">({dateTimeIST(s.baseline_as_of)} IST)</span></span>
-              <span className="k">Now</span><span className="num">{inr(q.price)} <span className={dir}>{pct(s.change_pct)}</span> <span className="faint">over {s.sessions} session{s.sessions === 1 ? '' : 's'}</span></span>
-              <span className="k">How unusual</span><span>{s.z != null ? <><span className="num">{Math.abs(s.z).toFixed(2)}σ</span> <span className="faint">— this stock typically moves {pct(item.sigma_daily, false)}/day</span></> : <span className="faint">no new prints</span>}</span>
-              <span className="k">Volume</span><span className="num">{compact(q.volume)} {item.volume_ratio != null && <span className={item.volume_ratio >= 2 ? 'muted' : 'faint'}>({item.volume_ratio.toFixed(1)}× normal)</span>}</span>
-              <span className="k">Day range</span><span className="num">{inr(q.day_low)} – {inr(q.day_high)} <span className="faint">open {inr(q.open)}, prev close {inr(q.prev_close)}</span></span>
-              <span className="k">Data</span><span className="faint">{q.freshness.label} · source: {q.freshness.source} · fetched {q.freshness.fetched_at ? ago(q.freshness.fetched_at) : '—'}</span>
+              <span className="k" title={HELP.saw}>You last saw</span><span className="num">{inr(s.baseline_price)} <span className="faint">({dateTimeIST(s.baseline_as_of)} IST)</span></span>
+              <span className="k" title={HELP.now}>Now</span><span className="num">{inr(q.price)} <span className={dir}>{pct(s.change_pct)}</span> <span className="faint">over {s.sessions} session{s.sessions === 1 ? '' : 's'}</span></span>
+              <span className="k" title={HELP.unusual}>How unusual</span>
+              <span className="unusual">
+                <span className={`ulabel ${s.unusual.label}`}>{s.unusual.label}</span>
+                <span className="muted">{s.unusual.text}</span>
+                {s.unusual.z != null && <span className="faint num" title="z-score: the move divided by this stock's typical move over the same span">({Math.abs(s.unusual.z).toFixed(1)}σ)</span>}
+              </span>
+              <span className="k" title={HELP.volume}>Volume</span><span className="num">{compact(q.volume)} {item.volume_ratio != null && <span className={item.volume_ratio >= 2 ? 'muted' : 'faint'}>({item.volume_ratio.toFixed(1)}× normal)</span>}</span>
+              <span className="k" title={HELP.range}>Day range</span><span className="num">{inr(q.day_low)} – {inr(q.day_high)} <span className="faint">open {inr(q.open)}, prev close {inr(q.prev_close)}</span></span>
+              <span className="k" title={HELP.data}>Data</span><span className="faint">{q.freshness.label} · source: {q.freshness.source} · fetched {q.freshness.fetched_at ? ago(q.freshness.fetched_at) : '—'}</span>
             </div>
             {item.high_52w != null && item.low_52w != null && (
               <>
-                <h4 style={{ marginTop: 16 }}>52-week range</h4>
+                <h4 style={{ marginTop: 16 }} title={HELP.week52}>52-week range <span className="faint" style={{ fontWeight: 400, letterSpacing: 0, textTransform: 'none' }}>· {item.range_position_52w != null ? `${Math.round(item.range_position_52w * 100)}% of the way from its yearly low to its yearly high` : ''}</span></h4>
                 <div className="range"><div className="fill" style={{ width: `${(item.range_position_52w ?? 0) * 100}%` }} /><div className="pin" style={{ left: `${(item.range_position_52w ?? 0) * 100}%` }} /></div>
                 <div className="range-l"><span className="num">{inr(item.low_52w)}</span><span className="num">{inr(item.high_52w)}</span></div>
               </>

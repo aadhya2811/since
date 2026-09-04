@@ -1,10 +1,11 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { ApiError, ConflictError, api, auth, newVisit, visitId } from './api'
-import type { Briefing, BriefingItem, SessionOut, User, Watchlist } from './types'
+import type { Board, Briefing, BriefingItem, SessionOut, User, Watchlist } from './types'
 import { Login } from './components/Login'
 import { AddSymbol } from './components/AddSymbol'
 import { QuietRow, StockCard } from './components/StockCard'
 import { WhatsNew } from './components/WhatsNew'
+import { PinnedBoard } from './components/PinnedBoard'
 import { dateTimeIST, timeIST } from './format'
 
 const POLL_MS = 30_000
@@ -40,6 +41,8 @@ function Main({ user, onLogout }: { user: User; onLogout: () => void }) {
   const [sessions, setSessions] = useState<SessionOut[]>([])
   const [error, setError] = useState<string | null>(null)
   const [modal, setModal] = useState<Briefing | null>(null)
+  const [board, setBoard] = useState<Board | null>(null)
+  const [jumpTo, setJumpTo] = useState<string | null>(null)
   const [busy, setBusy] = useState(false)
   const shownFor = useRef<string | null>(null)   // visit id the popup was already shown for
   const { toast, show } = useToast()
@@ -58,7 +61,8 @@ function Main({ user, onLogout }: { user: User; onLogout: () => void }) {
   const refresh = useCallback(async (id: number, quiet = false) => {
     if (!quiet) setLoading(true)
     try {
-      const b = await api.briefing(id)
+      const [b, bd] = await Promise.all([api.briefing(id), api.board().catch(() => null)])
+      if (bd) setBoard(bd)
       setBriefing(b); setError(null)
       // The popup: once per visit, the moment the briefing lands.
       const key = `${visitId()}:${id}`
@@ -130,8 +134,26 @@ function Main({ user, onLogout }: { user: User; onLogout: () => void }) {
   const quiet = items.filter(i => i.tier === 'quiet')
   const existing = new Set(active?.items.map(i => i.symbol) ?? [])
 
+  async function togglePin(symbol: string, pinned: boolean) {
+    if (pinned) await api.pin(symbol); else await api.unpin(symbol)
+    setBoard(await api.board())
+    if (active) await refresh(active.id, true)
+    show(pinned ? `${symbol.replace('.NS', '')} pinned to the top strip.` : `${symbol.replace('.NS', '')} unpinned.`)
+  }
+  function openFromTile(it: BriefingItem) {
+    if (it.watchlist_id && it.watchlist_id !== activeId) setActiveId(it.watchlist_id)
+    setExpanded(it.symbol)
+    setJumpTo(it.symbol)
+  }
+  // After the list renders (possibly a different watchlist), scroll to the card we were asked to open.
+  useEffect(() => {
+    if (!jumpTo || !briefing) return
+    const el = document.getElementById(`card-${jumpTo}`)
+    if (el) { el.scrollIntoView({ behavior: 'smooth', block: 'center' }); setJumpTo(null) }
+  }, [jumpTo, briefing])
+
   const cardProps = (it: BriefingItem) => ({
-    item: it, expanded: expanded === it.symbol,
+    item: it, expanded: expanded === it.symbol, anchorId: `card-${it.symbol}`, onTogglePin: togglePin,
     onToggle: () => setExpanded(e => (e === it.symbol ? null : it.symbol)),
     onAck: (s: string) => ack(s), onRemove: removeSymbol,
     onAddLevel: async (s: string, p: number, d: 'above' | 'below', n: string | null) => { await api.addLevel(s, p, d, n); if (active) await refresh(active.id, true) },
@@ -183,6 +205,10 @@ function Main({ user, onLogout }: { user: User; onLogout: () => void }) {
           }}>{busy ? 'Fetching prices & history…' : 'Create sample watchlist'}</button>{' '}
           <button className="btn" disabled={busy} onClick={async () => { const wl = await api.createWatchlist('My watchlist'); await loadLists(); setActiveId(wl.id) }}>Start empty</button>
         </div>
+      )}
+
+      {board && board.items.length > 0 && (
+        <PinnedBoard items={board.items} onOpen={openFromTile} onUnpin={s => togglePin(s, false)} />
       )}
 
       {active && (

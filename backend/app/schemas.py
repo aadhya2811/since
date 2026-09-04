@@ -122,6 +122,15 @@ class QuoteOut(BaseModel):
     freshness: Freshness
 
 
+class UnusualOut(BaseModel):
+    """Plain-language version of the z-score, for people who don't speak σ."""
+    label: str          # "Unchanged" | "Ordinary" | "Notable" | "Rare" | "Extreme"
+    text: str           # "Moved 0.1% — a normal day for this stock is about ±0.9%."
+    z: float | None
+    typical_move_pct: float          # σ_daily, as a fraction
+    typical_window_pct: float | None # σ over the elapsed sessions, as a fraction
+
+
 class SinceOut(BaseModel):
     baseline_price: float
     baseline_as_of: datetime
@@ -131,6 +140,7 @@ class SinceOut(BaseModel):
     change_pct: float
     sessions: int
     z: float | None
+    unusual: UnusualOut
 
 
 class ReasonOut(BaseModel):
@@ -154,6 +164,8 @@ class NewsSummary(BaseModel):
 
 class BriefingItem(BaseModel):
     symbol: str
+    pinned: bool = False
+    watchlist_id: int | None = None
     name: str
     sector: str | None
     tier: str
@@ -204,6 +216,21 @@ class BriefingOut(BaseModel):
     market: MarketOut
     data: DataStatus
     summary: BriefingSummary
+    items: list[BriefingItem]
+
+
+class PinIn(BaseModel):
+    symbol: str
+
+
+class PinOut(BaseModel):
+    id: int
+    symbol: str
+    position: int
+
+
+class BoardOut(BaseModel):
+    generated_at: datetime
     items: list[BriefingItem]
 
 

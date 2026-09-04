@@ -235,3 +235,34 @@ em { font-style: italic; color: var(--accent-2); }
 .modal .actions { display: flex; gap: 8px; justify-content: flex-end; margin-top: 14px; flex-wrap: wrap; }
 .modal .tip { margin-top: 12px; padding: 12px 14px; border-radius: 12px; background: linear-gradient(135deg, rgba(99,102,241,.14), rgba(168,85,247,.1)); border: 1px solid rgba(139,92,246,.3); font-size: 14px; color: var(--text-2); }
 .modal .tip b { color: var(--text); }
+
+/* ---------- pinned board ---------- */
+.board { margin-top: 16px; }
+.tiles { display: grid; grid-template-columns: repeat(auto-fill, minmax(178px, 1fr)); gap: 8px; }
+.tile { position: relative; background: linear-gradient(160deg, rgba(99,102,241,.10), rgba(168,85,247,.06) 60%, transparent); border: 1px solid rgba(139,92,246,.28); border-radius: 12px; padding: 10px 12px 9px; cursor: pointer; transition: border-color .12s, transform .08s, box-shadow .12s; }
+.tile:hover { border-color: rgba(165,180,252,.6); transform: translateY(-1px); box-shadow: 0 10px 30px -12px rgba(99,102,241,.6); }
+.tile.attention { border-color: rgba(251,113,133,.5); }
+.tile.attention::after { content: ""; position: absolute; top: 10px; right: 30px; width: 7px; height: 7px; border-radius: 50%; background: var(--down); box-shadow: 0 0 10px var(--down); }
+.tile-top { display: flex; align-items: center; justify-content: space-between; }
+.tile-top .t { font-weight: 700; font-size: 14px; letter-spacing: -0.01em; }
+.tile .unpin { border: 0; background: transparent; color: var(--text-3); font-size: 16px; line-height: 1; padding: 0 2px; border-radius: 4px; opacity: 0; transition: opacity .12s; }
+.tile:hover .unpin { opacity: 1; }
+.tile .unpin:hover { color: var(--text); background: var(--surface-3); }
+.tile-price { font-size: 20px; font-weight: 600; margin: 2px 0 1px; }
+.tile-row { display: flex; align-items: center; justify-content: space-between; font-size: 12.5px; }
+.tile-since { font-size: 12.5px; margin-top: 3px; font-weight: 600; }
+.tile-since .faint { font-weight: 400; }
+
+/* ---------- pin button on cards ---------- */
+.pinbtn { border: 1px solid transparent; background: transparent; color: var(--text-3); border-radius: 6px; padding: 1px 6px; font-size: 12px; line-height: 1.4; }
+.pinbtn:hover { color: var(--accent); background: var(--surface-2); }
+.pinbtn.on { color: var(--accent-2); border-color: rgba(139,92,246,.4); background: rgba(139,92,246,.12); }
+
+/* ---------- plain-language "how unusual" ---------- */
+.unusual { display: inline-flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.ulabel { font-weight: 700; font-size: 12px; padding: 2px 8px; border-radius: 999px; letter-spacing: .02em; }
+.ulabel.Unchanged, .ulabel.Ordinary { color: var(--text-2); background: var(--surface-3); }
+.ulabel.Notable { color: #ddd6fe; background: rgba(139,92,246,.2); }
+.ulabel.Rare { color: #fecdd3; background: rgba(251,113,133,.2); }
+.ulabel.Extreme { color: #fff; background: var(--down); }
+.kv .k { cursor: help; border-bottom: 1px dotted rgba(255,255,255,.18); align-self: start; }

@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from fastapi import APIRouter, Depends, Header, HTTPException, Request, status
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from .. import schemas
@@ -9,11 +9,11 @@ from ..auth import current_user
 from ..config import settings
 from ..db import get_db
 from ..engine import baselines as bl
-from ..engine.briefing import build_briefing
+from ..engine.briefing import build_board, build_briefing
 from ..market import calendar as cal
 from ..market.store import get_bars_many
 from ..market.universe import normalise
-from ..models import PriceLevel, Quote, User
+from ..models import Pin, PriceLevel, Quote, User
 from ..util import utcnow
 from .watchlists import get_owned
 
@@ -83,3 +83,38 @@ def rewind(wl_id: int, body: schemas.RewindIn, user: User = Depends(current_user
     n = bl.rewind(db, user.id, bars, body.sessions, now, market_open=cal.market_state(now).is_open)
     db.commit()
     return {"rewound": n, "sessions": body.sessions}
+
+
+# --------------------------------------------------------------------- pins
+
+
+@router.get("/pins", response_model=list[schemas.PinOut])
+def list_pins(user: User = Depends(current_user), db: Session = Depends(get_db)):
+    return db.scalars(select(Pin).where(Pin.user_id == user.id).order_by(Pin.position, Pin.id)).all()
+
+
+@router.post("/pins", response_model=list[schemas.PinOut], status_code=201)
+def add_pin(body: schemas.PinIn, request: Request, user: User = Depends(current_user), db: Session = Depends(get_db)):
+    symbol = normalise(body.symbol)
+    if db.scalar(select(Pin).where(Pin.user_id == user.id, Pin.symbol == symbol)) is None:  # idempotent
+        pos = db.scalar(select(func.coalesce(func.max(Pin.position), -1)).where(Pin.user_id == user.id)) + 1
+        db.add(Pin(user_id=user.id, symbol=symbol, position=pos))
+        db.commit()
+        request.app.state.market.poke()
+    return db.scalars(select(Pin).where(Pin.user_id == user.id).order_by(Pin.position, Pin.id)).all()
+
+
+@router.delete("/pins/{symbol}", response_model=list[schemas.PinOut])
+def remove_pin(symbol: str, user: User = Depends(current_user), db: Session = Depends(get_db)):
+    pin = db.scalar(select(Pin).where(Pin.user_id == user.id, Pin.symbol == normalise(symbol)))
+    if pin is not None:
+        db.delete(pin)
+        db.commit()
+    return db.scalars(select(Pin).where(Pin.user_id == user.id).order_by(Pin.position, Pin.id)).all()
+
+
+@router.get("/pins/board", response_model=schemas.BoardOut)
+def board(user: User = Depends(current_user), db: Session = Depends(get_db)):
+    out = build_board(db, user, utcnow())
+    db.commit()
+    return out

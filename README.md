@@ -20,7 +20,7 @@ The moment a visit starts, the briefing pops up as a summary — and on a first 
 
 ![What's new popup](docs/screenshot-whatsnew.png)
 
-Built end-to-end: FastAPI + SQLite backend, React/TypeScript frontend, real market data (Yahoo Finance, ~15 min delayed for NSE) with a deterministic simulated feed for tests and offline demos, and free news via Google News RSS. 34 backend tests. One container.
+Built end-to-end: FastAPI + SQLite backend, React/TypeScript frontend, real market data (Yahoo Finance, ~15 min delayed for NSE) with a deterministic simulated feed for tests and offline demos, and free news via Google News RSS. 35 backend tests. One container.
 
 ---
 
@@ -59,6 +59,8 @@ Everything else — auth, sync, resilience, scaling — exists to make those thr
 - **Come back and see what changed.** The briefing diffs against your own baseline. Sign in from a phone and the same baseline, levels and acknowledgements are there.
 - **Significance engine.** Move in σ over elapsed sessions, volume vs. 20-session average (session-fraction adjusted intraday), 52-week high/low breaches, gap opens, streaks, and crossings of price levels *you* set ("tell me if TCS falls below 3,400 — buy zone").
 - **News as context.** Headlines per company (Google News RSS), diffed against the same baseline: "2 new headlines since you looked". A big move with a fresh headline shows the headline as the likely *why*.
+- **Pin a tiny dashboard.** Star any stock and it sits in a strip at the top — price, today, since-you-looked, sparkline — across every watchlist. Click a tile to jump to its full card.
+- **Plain language, not jargon.** "How unusual" is a word — *Ordinary / Notable / Rare / Extreme* — plus "a normal 3-session stretch for this stock is about ±3.7%". The σ is there for people who want it, in brackets. Every label in the detail panel has a hover definition, because the target user has never used a brokerage terminal.
 - **Acknowledge.** "Seen it ✓" resets the baseline for one stock; "Mark all seen" for the list.
 - **Honest about data.** Provider name and delay in the status strip; a banner if the primary feed is down and you're seeing fallback data; stale prices shown greyed, never hidden.
 - **Time-travel demo control.** "Pretend I last looked 3 sessions ago." The core feature is invisible to a first-time visitor (no history yet) — this makes it visible in one click.
@@ -207,6 +209,7 @@ Baselines are per user, not per session, so your phone knows what you saw on you
 - **Quiet is a feature.** A 30-stock list where 25 are quiet should look like five cards and a short list — not thirty cards.
 - **News is context, not a signal.** A single fresh headline attaches to an existing flag as the likely "why". It does not create a flag on its own unless there are three or more since you looked (unusual news flow). No sentiment model: a classifier trained on nothing would be noise dressed as insight.
 - **The sparkline carries the baseline** as a dashed line, so "where was it when I looked" is visible without reading a number.
+- **Words before numbers.** An early tester (me, before I'd used a brokerage app) didn't know what "0.07σ" meant. Standard deviation is a statistics word, not a finance word. The detail panel now leads with *Ordinary* / *Notable* / *Rare* / *Extreme* and a sentence — "a normal day for this stock is about ±0.9%" — and keeps σ in brackets for those who want it. Volume, day range, open, previous close and 52-week range are what every brokerage app shows, so they stay, with hover definitions.
 
 ### 5.4 State across sessions and devices
 
@@ -293,7 +296,7 @@ The rubric asks where to keep things simple. These were considered and cut on pu
 ## 9. Testing
 
 ```
-cd backend && python -m pytest -q      # 34 tests, ~4s, no network
+cd backend && python -m pytest -q      # 35 tests, ~4s, no network
 ```
 
 |File|Covers|
@@ -319,6 +322,8 @@ All under `/api`. Auth via `Authorization: Bearer <token>`. Full OpenAPI at `/do
 |GET|`/watchlists/{id}/briefing`|the product; send `X-Visit-Id`|
 |POST|`/watchlists/{id}/ack`|`{symbols: [...]}` or `{symbols: null}` for all|
 |POST|`/watchlists/{id}/demo/rewind`|`{sessions: n}` — set baseline to the close n sessions ago|
+|GET/POST/DELETE|`/pins[/{symbol}]`|the always-watch set, across lists|
+|GET|`/pins/board`|pinned symbols scored like the briefing, in pin order|
 |GET/POST/DELETE|`/levels[/{id}]`|price levels with direction + note|
 |GET|`/symbols/search?q=`|universe search|
 |GET|`/health`|market state, provider breakers, scheduler liveness|

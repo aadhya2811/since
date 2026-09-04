@@ -21,7 +21,7 @@ from sqlalchemy import distinct, func, select
 
 from ..config import Settings
 from ..db import session_scope
-from ..models import PriceLevel, Quote, SymbolMeta, User, Watchlist, WatchlistItem
+from ..models import Pin, PriceLevel, Quote, SymbolMeta, User, Watchlist, WatchlistItem
 from ..util import utcnow
 from . import calendar as cal
 from .news import GoogleNewsProvider, NewsProvider, SimulatedNewsProvider
@@ -313,7 +313,8 @@ class MarketService:
     def _tracked_symbols(db) -> list[str]:
         a = db.scalars(select(distinct(WatchlistItem.symbol))).all()
         b = db.scalars(select(distinct(PriceLevel.symbol))).all()
-        return sorted(set(a) | set(b))
+        c = db.scalars(select(distinct(Pin.symbol))).all()
+        return sorted(set(a) | set(b) | set(c))
 
     @staticmethod
     def _hot_symbols(db, now) -> set[str]:
