@@ -1,6 +1,6 @@
 # Test report
 
-Generated **06 Sep 2026, 13:55 UTC** by `python scripts/make_test_report.py`, from an actual run. Re-running it regenerates this file; it is evidence, not a claim.
+Generated **06 Sep 2026, 14:53 UTC** by `python scripts/make_test_report.py`, from an actual run. Re-running it regenerates this file; it is evidence, not a claim.
 
 **80 tests passing**, 0 failing. Backend line coverage **85%**.
 

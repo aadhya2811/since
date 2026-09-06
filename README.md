@@ -14,13 +14,13 @@ INDUSINDBK   ₹810.76  −2.3% today          −7.4% since Tuesday · 2.2σ
   In the news: "IndusInd Bank falls after RBI seeks clarification on derivatives accounting" (Mint) +2 more
 ```
 
-![Since — briefing view](docs/screenshot.png)
+![Since — briefing view](docs/screenshot-briefing.png)
 
 The moment a visit starts, the briefing pops up as a summary — and on a first visit it explains that the baseline was just set and offers to rewind:
 
 ![What's new popup](docs/screenshot-whatsnew.png)
 
-Built end-to-end: FastAPI + SQLite backend, React/TypeScript frontend, real market data (Yahoo Finance, ~15 min delayed for NSE) with a deterministic simulated feed for tests and offline demos, and free news via Google News RSS. 44 backend tests. One container.
+Built end-to-end: FastAPI + SQLite backend, React/TypeScript frontend, real market data (Yahoo Finance, ~15 min delayed for NSE) with a deterministic simulated feed for tests and offline demos, and free news via Google News RSS. 80 backend tests and a generated data-provenance report. One container.
 
 ---
 
@@ -52,6 +52,17 @@ The brief asks for a watchlist that helps users "quickly understand what has *me
 
 Everything else — auth, sync, resilience, scaling — exists to make those three things true reliably.
 
+There is a fourth idea the brief does not ask for, and it is the one I would defend hardest. The three rows above are all about **attention**: what is worth your eyes in the next thirty seconds. But the question that actually decides outcomes is one level up, and it runs on a slower clock — *is the reason I got interested in this still true?* Everybody remembers the price they bought at. Almost nobody remembers **why**, which is the only way to tell a broken thesis from a bad week.
+
+So Since runs the same diff machinery twice, against two different baselines:
+
+| | Baseline | Advances when | Question it answers |
+|---|---|---|---|
+| **Briefing** | the price you last **saw** | you come back after a visit ends | *What changed while I was away?* |
+| **Analyst memory** | the price when you last **thought about it** | you review the thesis | *Is my reason still true?* |
+
+That second row is §5.10, and it is the part of this build I had not seen anywhere else.
+
 ## 2. What it does
 
 - **Create and manage watchlists.** Multiple lists, search-as-you-type over an NSE universe or any Yahoo-style ticker (validated against the feed before it is accepted).
@@ -63,13 +74,14 @@ Everything else — auth, sync, resilience, scaling — exists to make those thr
 - **Plain language, not jargon.** "How unusual" is a word — *Ordinary / Notable / Rare / Extreme* — plus "a normal 3-session stretch for this stock is about ±3.7%". The σ is there for people who want it, in brackets. Every label in the detail panel has a hover definition, because the target user has never used a brokerage terminal.
 - **Acknowledge.** "Seen it ✓" resets the baseline for one stock; "Mark all seen" for the list.
 - **Honest about data.** Provider name and delay in the status strip; a banner if the primary feed is down and you're seeing fallback data; stale prices shown greyed, never hidden.
+- **A command strip above the fold.** Nifty and Bank Nifty, your list's net move since you looked, how many stocks need attention, and how many of your own reasons need re-reading — five numbers that answer "should I read further?" in one glance. Every one of them is already computed for something else on the page; the strip is a layout decision, not a new data source.
 - **Time-travel demo control.** "Pretend I last looked 3 sessions ago." The core feature is invisible to a first-time visitor (no history yet) — this makes it visible in one click.
 
 **Fundamentals, where the feed will give them.** Market cap, trailing and forward P/E, P/B, EPS, ROE, profit margin, revenue growth, debt/equity, dividend yield and beta, on every card, with the quarter they were reported for and the source beside them. This is the one part of the app that depends on an endpoint the vendor actively gates (Yahoo serves fundamentals behind a cookie-and-crumb handshake), so it is built to fail loudly rather than quietly: no crumb means the card says the figures aren't available, and a field the vendor omits renders as **—**, never as `0.0`. A loss-making company genuinely has no trailing P/E, and printing a zero there would be the most misleading thing this app could do. Run `python scripts/check_fundamentals.py` to see what a given network actually gets. See §5.11.
 
 **Analyst memory — why you were interested, and whether it still holds.** The rest of the app answers *what changed since you last looked?*. This answers the question one level up. Write the reason you got interested in a stock, in one sentence, in your own words. Since timestamps it, anchors it to the price at that moment, and then leaves you alone — until something happens that has earned the right to interrupt: a statistically rare move, a *materially* large one, a 52-week breach, a burst of coverage, or the horizon you set. Then it shows your own words back to you, above the price, and asks whether they still hold. You answer *still holds / weaker now / it broke*; the answer is recorded with the price context, and the anchor moves forward. Over time the Memory page shows the number almost nobody keeps on themselves: **how often your reasons survived contact with the market** — which, unlike P&L, does not conflate being right with being lucky. See §5.10.
 
-Three more pages, all built on data already in the database — no extra vendors, no API keys:
+Four more pages, all built on data already in the database — no extra vendors, no API keys:
 
 - **News** — a real news page, not a per-stock log. Three streams share one pipeline: **market-wide topics** (Nifty/Sensex, RBI & SEBI policy, FII/DII flows, IPOs) stored under pseudo-symbols like `^MARKET`; the **companies you follow**; and the **index heavyweights** you don't, fetched regardless so the feed has substance on day one. Filter with one control — Everything / My stocks / Market — then narrow to a single topic or ticker. "New" is measured against the same baseline the briefing uses, so a headline is new because *you* haven't seen it, not because it is recent. Lead story, card grid, publisher monograms (Google News RSS carries no images, so identity is typographic), and de-duplication when the same story files under two symbols.
 - **Compare** — 2–6 stocks on one chart, indexed to 100 so the lines are actually comparable, plus volatility, max drawdown, 52-week position, average volume, and a correlation matrix of daily moves.
@@ -149,9 +161,11 @@ All settings are environment variables prefixed `SINCE_` — see `backend/.env.e
                          │  market/store ── monotonic-time upserts         │
                          └───────────────┬─────────────────────────────────┘
                                          ▼
-                          SQLite (WAL)  — quotes · daily_bars · news_items   ← shared, keyed by symbol
+                          SQLite (WAL)  — quotes · daily_bars · news_items ·
+                                          fundamentals                      ← shared, keyed by symbol
                                         — users · sessions · watchlists ·
-                                          baselines · price_levels          ← per user
+                                          baselines · price_levels ·
+                                          theses · thesis_reviews           ← per user
 ```
 
 **Request path.** `GET /watchlists/{id}/briefing` reads the stored quotes, bars, news and the user's baselines/levels for that list, runs `assess()` per symbol, and returns tiers + reasons. It never calls a market data vendor. Latency is a few SQLite reads regardless of how many users exist.
@@ -164,19 +178,32 @@ All settings are environment variables prefixed `SINCE_` — see `backend/.env.e
 backend/app/
   engine/significance.py   the scoring model — pure, tested, ~250 lines
   engine/baselines.py      visits, baselines, acknowledge, rewind
-  engine/briefing.py       assembly: quotes+bars+news+baselines → BriefingOut
-  market/provider.py       MarketDataProvider interface (QuoteData, BarData)
-  market/yahoo.py          Yahoo Finance v8 chart provider
+  engine/thesis.py         analyst memory: anchors, review triggers, the record
+  engine/briefing.py       assembly: quotes+bars+news+baselines+theses → BriefingOut
+  engine/analytics.py      Market, Compare and News page builders
+  mailer.py                login-code delivery: SMTP if configured, screen if not
+  market/provider.py       MarketDataProvider interface (QuoteData, BarData,
+                           FundamentalsData)
+  market/yahoo.py          Yahoo v8 chart (quotes + bars) and the crumb-gated
+                           quoteSummary endpoint (fundamentals)
   market/simulated.py      deterministic feed + scripted events
   market/news.py           NewsProvider: Google News RSS + simulated
   market/resilient.py      circuit breaker + fallback chain
   market/store.py          the only writer of market data; conflict rules live here
   market/service.py        the refresh loop and tiering policy
   market/calendar.py       NSE sessions, holidays, sessions_between()
-  routers/                 auth, watchlists (optimistic concurrency), briefing, misc
+  routers/                 auth, watchlists (optimistic concurrency), briefing,
+                           thesis, misc (market / compare / news)
+scripts/
+  make_test_report.py      regenerates docs/TEST_REPORT.md from a real test run
+  check_fundamentals.py    does the gated fundamentals endpoint work from here?
 frontend/src/
-  App.tsx                  briefing view, polling, conflict handling
-  components/StockCard.tsx card, detail drawer, levels, news
+  App.tsx                  briefing view, routing, polling, conflict handling
+  components/CommandStrip  the five numbers above the fold
+  components/StockCard     card, detail drawer, levels, news
+  components/ThesisBlock   write a reason; answer "does this still hold?"
+  components/Fundamentals* P/E, ROE and the rest — or an honest dash
+  pages/                   Memory, News, Compare, Market
   api.ts                   token, visit id, If-Match, ConflictError
 ```
 
@@ -417,11 +444,11 @@ All under `/api`. Auth via `Authorization: Bearer <token>`. Full OpenAPI at `/do
 In the order I would do them:
 
 1. **Learned ranking on top of the formula.** Log which flagged items users expand or acknowledge quickly vs. ignore; fit per-user weights for the score components. The formula stays as the explainable prior.
-2. **Sector/index-relative moves.** "Down 3% on a day the Bank Nifty fell 3%" is not news. Subtract the sector's move before scoring.
+2. **Sector-relative scoring.** Index-relative shipped (§5.4): a move that is mostly Nifty gets demoted a tier, and a move *against* the market gets promoted. Sector is the missing half — "down 3% on a day IT fell 3%" is not news either. The Market page already computes sector aggregates; feeding them back into `assess()` is one function, and needs a proper sector index rather than my equal-weighted proxy.
 3. **Push delivery** of the briefing when something crosses into *Needs attention* while you're away — the engine already produces exactly the payload.
 4. **Postgres + multi-worker refresh** as described in §7, when symbol count × users makes one loop the bottleneck.
-5. **Earnings calendar** as a first-class event ("results on Thursday") — the one scheduled thing every watcher wants to know.
-6. **Sector-relative scoring inside the briefing.** The Market page computes sector aggregates already; feeding "IT fell 3% today" back into `assess()` would discount an Infosys move the same way Nifty does now. One function, needs a proper sector index rather than my equal-weighted proxy.
+5. **Earnings calendar** as a first-class event ("results on Thursday") — the one scheduled thing every watcher wants to know, and the natural trigger for an analyst-memory prompt: a thesis is never more worth re-reading than the morning after results.
+6. **Promoter holding and FII/DII flows.** The India-specific disclosures Yahoo does not carry (§5.11). They need NSE/BSE scraping, which I was not willing to ship without time to test it properly — a wrong shareholding number is worse than an absent one.
 7. **A real-time broker feed** (Zerodha Kite Connect, Groww API) behind the same `MarketDataProvider` interface — one new file — so the *Live* badge is earned rather than declared.
 
 ---
