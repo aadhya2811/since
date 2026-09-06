@@ -375,3 +375,100 @@ table.corr td { border-radius: 6px; font-size: 13px; }
 .mv-name { color: var(--text-2); font-size: 12.5px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .mv-price, .mv-ret { text-align: right; }
 .mv-ret { font-weight: 600; }
+
+/* ── command strip ─────────────────────────────────────────────────────────
+   Five numbers above the fold. Everything here is already computed elsewhere;
+   this is a layout decision, not a new data source. */
+.cstrip { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 10px; margin-top: 16px; }
+.cs-cell { background: var(--surface); border: 1px solid var(--line); border-radius: 12px; padding: 11px 13px 10px;
+  text-align: left; font: inherit; color: inherit; position: relative; overflow: hidden; }
+button.cs-cell { cursor: pointer; transition: border-color .12s, background .12s; }
+button.cs-cell:hover { border-color: var(--line-2); background: var(--surface-2); }
+.cs-cell.hot { border-color: rgba(251,113,133,.4); background: rgba(251,113,133,.06); }
+.cs-cell.hot .cs-v { color: var(--down); }
+.cs-k { font-size: 11px; text-transform: uppercase; letter-spacing: .1em; color: var(--text-3); font-weight: 700; white-space: nowrap;
+  overflow: hidden; text-overflow: ellipsis; }
+.cs-v { font-family: var(--mono); font-size: 25px; font-weight: 600; letter-spacing: -.02em; margin-top: 3px; line-height: 1.15; }
+.cs-d { font-size: 13px; margin-left: 7px; font-weight: 500; }
+.cs-sub { font-size: 11.5px; margin-top: 2px; }
+.cs-spark { margin-top: 1px; opacity: .85; }
+@media (max-width: 1000px) { .cstrip { grid-template-columns: repeat(2, minmax(0, 1fr)); } .cs-cell.idx:nth-child(2) { display: none; } }
+
+.navdot { display: inline-block; min-width: 17px; margin-left: 6px; padding: 0 5px; border-radius: 9px; font-family: var(--mono);
+  font-size: 11px; line-height: 17px; background: var(--down); color: #1a0a10; font-weight: 700; vertical-align: 1px; }
+
+/* ── analyst memory ────────────────────────────────────────────────────────
+   Your own words, given the same visual weight as the price. That is the
+   whole argument of the feature, expressed as layout. */
+.thesis { grid-column: 1 / -1; border-top: 1px solid var(--line); padding-top: 14px; }
+.thesis.due { border-top-color: rgba(251,113,133,.35); }
+.thesis-text { margin: 0 0 10px; padding: 10px 14px; border-left: 3px solid var(--violet); background: rgba(168,85,247,.07);
+  border-radius: 0 8px 8px 0; font-size: 15.5px; line-height: 1.5; color: var(--text); font-style: normal; }
+.thesis-since { display: flex; align-items: baseline; gap: 9px; flex-wrap: wrap; margin-bottom: 10px; }
+.thesis-since .num { font-size: 16px; font-weight: 600; }
+.thesis-actions { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.thesis.empty p { margin: 0 0 10px; max-width: 620px; }
+.ta { width: 100%; resize: vertical; font-family: var(--sans); font-size: 14.5px; line-height: 1.5; }
+.thesis-form-row { display: flex; align-items: center; gap: 8px; margin-top: 8px; flex-wrap: wrap; }
+.thesis-form-row select { margin-left: 6px; background: var(--surface-2); color: var(--text); border: 1px solid var(--line-2);
+  border-radius: 7px; padding: 3px 6px; font: inherit; font-size: 12px; }
+.thesis-inline { font-size: 14px; line-height: 1.45; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+
+.thesis-prompt { border: 1px solid rgba(251,113,133,.32); background: rgba(251,113,133,.05); border-radius: 12px; padding: 13px 14px; }
+.tp-head { display: flex; align-items: center; gap: 9px; font-size: 16px; font-weight: 700; letter-spacing: -.01em; margin-bottom: 6px; }
+.tp-tag { font-family: var(--mono); font-size: 10.5px; text-transform: uppercase; letter-spacing: .09em; padding: 2px 7px;
+  border-radius: 6px; background: var(--surface-3); color: var(--accent); border: 1px solid var(--line-2); font-weight: 600; }
+.tp-tag.range { color: var(--amber); border-color: rgba(251,191,36,.4); }
+.tp-tag.move { color: var(--down); border-color: rgba(251,113,133,.4); }
+.tp-why { margin: 0 0 10px; color: var(--text-2); font-size: 14.5px; line-height: 1.5; max-width: 660px; }
+.tp-actions { display: flex; align-items: center; gap: 8px; margin: 9px 0 7px; flex-wrap: wrap; }
+.btn.ok:hover { border-color: var(--up); color: var(--up); }
+.btn.warn:hover { border-color: var(--amber); color: var(--amber); }
+.btn.bad:hover { border-color: var(--down); color: var(--down); }
+.badge.ask { color: var(--violet); border-color: rgba(168,85,247,.5); background: rgba(168,85,247,.12); }
+
+.thesis-history { list-style: none; margin: 12px 0 0; padding: 10px 0 0; border-top: 1px dashed var(--line); }
+.thesis-history li { display: flex; align-items: baseline; gap: 9px; padding: 4px 0; flex-wrap: wrap; }
+.thesis-history .note { color: var(--text-2); font-size: 13.5px; }
+.verdict { font-family: var(--mono); font-size: 10.5px; text-transform: uppercase; letter-spacing: .08em; padding: 1px 7px;
+  border-radius: 5px; font-weight: 700; }
+.verdict.holds { color: var(--up); background: rgba(52,211,153,.12); }
+.verdict.weakened { color: var(--amber); background: rgba(251,191,36,.12); }
+.verdict.broken { color: var(--down); background: rgba(251,113,133,.12); }
+
+.detail.one { grid-template-columns: 1fr; }
+.card.closed { opacity: .72; }
+.card.closed:hover { opacity: 1; }
+
+/* the record: how often your reasons survived contact with the market */
+.record { display: grid; grid-template-columns: 190px 1fr; gap: 16px 20px; align-items: center; margin-top: 16px;
+  background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius); padding: 16px 18px; }
+.rec-cell .cs-v { font-size: 34px; }
+.rec-bar { display: flex; height: 12px; border-radius: 6px; overflow: hidden; background: var(--surface-2); }
+.rec-bar .seg { min-width: 2px; }
+.seg.holds { background: var(--up); } .seg.weakened { background: var(--amber); } .seg.broken { background: var(--down); }
+.rec-legend { grid-column: 2; display: flex; gap: 18px; flex-wrap: wrap; font-size: 13px; color: var(--text-2); margin-top: -8px; }
+.rec-legend span { display: flex; align-items: center; gap: 6px; }
+.sw { width: 9px; height: 9px; border-radius: 3px; display: inline-block; }
+.sw.holds { background: var(--up); } .sw.weakened { background: var(--amber); } .sw.broken { background: var(--down); }
+@media (max-width: 720px) { .record { grid-template-columns: 1fr; } .rec-legend { grid-column: 1; } }
+.thesis-demo { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin-top: 12px; padding-top: 10px;
+  border-top: 1px dashed var(--line); }
+/* The memory card gives the reason the space the sparkline gets elsewhere —
+   on this page your own words are the primary column, not the price. */
+.card.memory .card-main { grid-template-columns: minmax(0, 1fr) minmax(0, 1.9fr) 150px; cursor: pointer; }
+.card.memory .thesis-inline { font-size: 14.5px; line-height: 1.5; color: var(--text); }
+.card.memory.closed .card-main { cursor: default; }
+
+/* ── fundamentals ──────────────────────────────────────────────────────────
+   A dash is a real answer here: a loss-making company has no P/E, and a "0.0"
+   in that slot would be a lie dressed as data. So the empty state is styled
+   deliberately — dimmer than a number, but present. */
+.fundamentals { grid-column: 1 / -1; border-top: 1px solid var(--line); padding-top: 14px; }
+.fgrid { display: grid; grid-template-columns: repeat(auto-fit, minmax(126px, 1fr)); gap: 10px 14px; }
+.fcell { background: var(--surface); border: 1px solid var(--line); border-radius: 9px; padding: 8px 10px; }
+.fk { font-size: 11px; text-transform: uppercase; letter-spacing: .07em; color: var(--text-3); font-weight: 700;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis; cursor: help; }
+.fv { font-size: 17px; font-weight: 600; letter-spacing: -.02em; margin-top: 2px; white-space: nowrap; }
+.fv.none { color: var(--text-3); font-weight: 400; }
+.fsrc { margin-top: 10px; line-height: 1.5; }

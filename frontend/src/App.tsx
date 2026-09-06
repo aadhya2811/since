@@ -9,14 +9,18 @@ import { PinnedBoard } from './components/PinnedBoard'
 import { NewsPage } from './pages/NewsPage'
 import { ComparePage } from './pages/ComparePage'
 import { MarketPage } from './pages/MarketPage'
+import { MemoryPage } from './pages/MemoryPage'
+import { CommandStrip } from './components/CommandStrip'
 import { dateTimeIST, timeIST } from './format'
 
 const POLL_MS = 30_000
 
-type Page = 'briefing' | 'news' | 'compare' | 'market'
+type Page = 'briefing' | 'news' | 'memory' | 'compare' | 'market'
+const PAGES: Page[] = ['briefing', 'news', 'memory', 'compare', 'market']
+const PAGE_LABEL: Record<Page, string> = { briefing: 'Briefing', news: 'News', memory: 'Memory', compare: 'Compare', market: 'Market' }
 function pageFromHash(): Page {
   const h = location.hash.replace('#/', '')
-  return (['news', 'compare', 'market'] as Page[]).includes(h as Page) ? (h as Page) : 'briefing'
+  return PAGES.includes(h as Page) ? (h as Page) : 'briefing'
 }
 function useHashPage(): [Page, (p: Page) => void] {
   const [page, setPage] = useState<Page>(pageFromHash)
@@ -148,6 +152,7 @@ function Main({ user, onLogout }: { user: User; onLogout: () => void }) {
   }
 
   const items = briefing?.items ?? []
+  const due = briefing?.summary.theses_due ?? 0
   const attention = items.filter(i => i.tier === 'attention')
   const notable = items.filter(i => i.tier === 'notable')
   const quiet = items.filter(i => i.tier === 'quiet')
@@ -175,6 +180,7 @@ function Main({ user, onLogout }: { user: User; onLogout: () => void }) {
     item: it, expanded: expanded === it.symbol, anchorId: `card-${it.symbol}`, onTogglePin: togglePin,
     onToggle: () => setExpanded(e => (e === it.symbol ? null : it.symbol)),
     onAck: (s: string) => ack(s), onRemove: removeSymbol,
+    onThesisChanged: async () => { if (active) await refresh(active.id, true) },
     onAddLevel: async (s: string, p: number, d: 'above' | 'below', n: string | null) => { await api.addLevel(s, p, d, n); if (active) await refresh(active.id, true) },
     onDeleteLevel: async (id: number) => { await api.deleteLevel(id); if (active) await refresh(active.id, true) },
   })
@@ -185,8 +191,11 @@ function Main({ user, onLogout }: { user: User; onLogout: () => void }) {
       <div className="topbar-inner">
         <div className="brand"><h1 onClick={() => go('briefing')} style={{ cursor: 'pointer' }}>Since<span>.</span></h1><span className="tag">what changed since you last looked</span></div>
         <nav className="nav">
-          {(['briefing', 'news', 'compare', 'market'] as Page[]).map(p => (
-            <button key={p} className={page === p ? 'on' : ''} onClick={() => go(p)}>{p === 'briefing' ? 'Briefing' : p === 'news' ? 'News' : p === 'compare' ? 'Compare' : 'Market'}</button>
+          {PAGES.map(p => (
+            <button key={p} className={page === p ? 'on' : ''} onClick={() => go(p)}>
+              {PAGE_LABEL[p]}
+              {p === 'memory' && due > 0 && <span className="navdot">{due}</span>}
+            </button>
           ))}
         </nav>
         <div className="topbar-right">
@@ -210,7 +219,14 @@ function Main({ user, onLogout }: { user: User; onLogout: () => void }) {
       {briefing?.data.note && <div className="banner">{briefing.data.note}</div>}
       {error && <div className="banner">{error}</div>}
 
+      {page === 'briefing' && briefing && items.length > 0 && (
+        <CommandStrip briefing={briefing}
+                      onJumpAttention={() => document.querySelector('.section.attention')?.scrollIntoView({ behavior: 'smooth', block: 'start' })}
+                      onOpenMemory={() => go('memory')} />
+      )}
+
       {page === 'news' && <NewsPage />}
+      {page === 'memory' && <MemoryPage />}
       {page === 'compare' && lists && <ComparePage lists={lists} />}
       {page === 'market' && <MarketPage onAdd={async s => { if (!active) { show('Create a watchlist first.', true); return } await addSymbol(s); show(`${s.replace('.NS', '')} added to ${active.name}.`) }} />}
 

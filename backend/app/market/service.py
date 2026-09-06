@@ -21,14 +21,14 @@ from sqlalchemy import distinct, func, select
 
 from ..config import Settings
 from ..db import session_scope
-from ..models import Pin, PriceLevel, Quote, SymbolMeta, User, Watchlist, WatchlistItem
+from ..models import Fundamental, Pin, PriceLevel, Quote, SymbolMeta, User, Watchlist, WatchlistItem
 from ..util import utcnow
 from . import calendar as cal
 from .news import HEADLINE_SYMBOLS, MARKET_TOPICS, GoogleNewsProvider, NewsProvider, SimulatedNewsProvider
 from .provider import MarketDataProvider, ProviderError, SymbolNotFound
 from .resilient import Breaker, ResilientProvider
 from .simulated import SimulatedProvider
-from .store import ensure_symbol, upsert_bars, upsert_news, upsert_quote
+from .store import ensure_symbol, upsert_bars, upsert_fundamentals, upsert_news, upsert_quote
 from .yahoo import YahooProvider
 
 log = logging.getLogger(__name__)
@@ -36,6 +36,11 @@ log = logging.getLogger(__name__)
 QUOTE_BATCH = 20
 HOT_WINDOW = timedelta(minutes=15)
 MISSES_BEFORE_UNAVAILABLE = 2      # consecutive "not in response" before we give up on a ticker
+# Fundamentals move once a quarter. Refetching them more than daily would be
+# pure noise — and the endpoint that serves them is the rate-limited one.
+FUNDAMENTALS_MAX_AGE = timedelta(hours=20)
+FUNDAMENTALS_RETRY_AFTER_MISS = timedelta(hours=6)
+FUNDAMENTALS_PER_TICK = 8
 UNAVAILABLE_RETRY = timedelta(hours=24)
 
 
@@ -84,7 +89,7 @@ class MarketService:
         # Symbols with a fetch in progress, per kind. The refresh loop, a
         # sample-list warmup and an "add symbol" can all want the same
         # ticker at the same moment; only one request goes out.
-        self._inflight: dict[str, set[str]] = {"quote": set(), "bars": set(), "news": set()}
+        self._inflight: dict[str, set[str]] = {"quote": set(), "bars": set(), "news": set(), "funda": set()}
         self.last_tick_at = None
         self.last_error: str | None = None
 
@@ -177,6 +182,21 @@ class MarketService:
                     if m is None or m.news_refreshed_at is None or (now - m.news_refreshed_at).total_seconds() >= mins * 60:
                         due_news.append(s)
 
+            # Fundamentals: daily at most, only for symbols someone watches.
+            # A symbol whose last attempt produced nothing is retried on a
+            # slower clock rather than hammered — the usual cause is Yahoo
+            # having revoked the crumb, which no amount of retrying fixes.
+            due_funda: list[str] = []
+            funda = {f.symbol: f for f in db.scalars(select(Fundamental).where(Fundamental.symbol.in_(tracked)))} if tracked else {}
+            for s_ in tracked:
+                if skip(s_) or s_.startswith("^"):     # indices have no P/E
+                    continue
+                f = funda.get(s_)
+                if f is None:
+                    due_funda.append(s_)
+                elif now - f.fetched_at >= (FUNDAMENTALS_MAX_AGE if f.source != "none" else FUNDAMENTALS_RETRY_AFTER_MISS):
+                    due_funda.append(s_)
+
             # Universe scan: bars for names nobody watches yet, a few per tick.
             due_scan: list[str] = []
             if self.settings.universe_scan:
@@ -195,6 +215,8 @@ class MarketService:
 
         if due_quotes:
             await self.refresh_quotes(due_quotes)
+        if due_funda:
+            await self.refresh_fundamentals(due_funda[:FUNDAMENTALS_PER_TICK])
         # Bars and news are heavier; a bounded slice per tick, fetched concurrently
         # (the providers cap their own connection counts).
         await asyncio.gather(*(self.refresh_bars(s) for s in due_bars[:12]),
@@ -210,6 +232,7 @@ class MarketService:
         await self.refresh_quotes(symbols)
         await asyncio.gather(*(self.refresh_bars(s) for s in symbols))
         await asyncio.gather(*(self.refresh_news(s) for s in symbols))
+        await self.refresh_fundamentals(symbols)
 
     # ------------------------------------------------------------ fetchers
     async def refresh_quotes(self, symbols: list[str]) -> int:
@@ -249,6 +272,43 @@ class MarketService:
         finally:
             self._inflight["quote"].difference_update(symbols)
         return updated
+
+    async def refresh_fundamentals(self, symbols: list[str]) -> int:
+        """Best-effort. Fundamentals are the one part of this app that depends
+        on an endpoint the vendor actively gates, so every failure path here
+        ends in "we have no fundamentals for this symbol" — never in a broken
+        briefing, and never in a stored zero.
+
+        A symbol the vendor declined to answer for is stamped with source
+        "none" so the UI can distinguish *we asked and were told nothing* from
+        *we have not asked yet*, and so the retry clock is slower.
+        """
+        symbols = [s for s in symbols if s not in self._inflight["funda"]]
+        if not symbols:
+            return 0
+        self._inflight["funda"].update(symbols)
+        stored = 0
+        try:
+            try:
+                got = await self.provider.get_fundamentals(symbols)
+            except ProviderError as e:
+                log.info("fundamentals refresh failed for %d symbols: %s", len(symbols), e)
+                got = {}
+            with session_scope() as db:
+                for f in got.values():
+                    upsert_fundamentals(db, f)
+                    stored += 1
+                for s in symbols:
+                    if s in got:
+                        continue
+                    row = db.get(Fundamental, s)
+                    if row is None:
+                        row = Fundamental(symbol=s)
+                        db.add(row)
+                    row.source, row.fetched_at = "none", utcnow()
+        finally:
+            self._inflight["funda"].difference_update(symbols)
+        return stored
 
     async def refresh_bars(self, symbol: str) -> int:
         if symbol in self._inflight["bars"]:

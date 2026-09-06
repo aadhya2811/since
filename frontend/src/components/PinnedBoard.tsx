@@ -1,5 +1,5 @@
 import type { BriefingItem } from '../types'
-import { inr, pct, sign } from '../format'
+import { inr, pct, sign, sincePct } from '../format'
 import { Sparkline } from './Sparkline'
 
 const ticker = (s: string) => s.replace(/\.NS$/, '').replace(/^\^/, '')
@@ -30,7 +30,7 @@ export function PinnedBoard({ items, onOpen, onUnpin }: {
                 <span className={`num ${sign(q?.day_change_pct)}`}>{pct(q?.day_change_pct)} <span className="faint">today</span></span>
                 <Sparkline data={it.sparkline} width={64} height={20} baseline={s?.baseline_price ?? null} />
               </div>
-              <div className={`tile-since num ${d}`}>{pct(s?.change_pct)} <span className="faint">since {s?.seen_label ?? '—'}</span></div>
+              <div className={`tile-since num ${s?.same_print ? 'flat' : d}`}>{sincePct(s?.change_pct, s?.same_print)} <span className="faint">{s?.same_print ? 'nothing new yet' : `since ${s?.seen_label ?? '—'}`}</span></div>
             </div>
           )
         })}

@@ -21,7 +21,7 @@ from sqlalchemy.orm import Session
 from ..models import DailyBar, NewsItem, Quote, SymbolMeta
 from ..util import utcnow
 from .news import NewsData
-from .provider import BarData, QuoteData
+from .provider import BarData, FundamentalsData, QuoteData
 from .universe import BY_SYMBOL
 
 log = logging.getLogger(__name__)
@@ -155,3 +155,29 @@ def get_news_many(db: Session, symbols: list[str], since: datetime, limit_per_sy
         if len(out[r.symbol]) < limit_per_symbol:
             out[r.symbol].append(r)
     return out
+
+
+def upsert_fundamentals(db: Session, f: FundamentalsData) -> None:
+    """Overwrite in place. Unlike quotes there is no monotonic-time rule here:
+    a restatement is a correction, and the newest answer from the vendor is
+    the one to keep."""
+    from ..models import Fundamental
+
+    row = db.get(Fundamental, f.symbol)
+    if row is None:
+        row = Fundamental(symbol=f.symbol)
+        db.add(row)
+    for field in ("market_cap", "pe_trailing", "pe_forward", "price_to_book", "eps_trailing",
+                  "book_value", "roe", "dividend_yield", "debt_to_equity", "profit_margin",
+                  "revenue_growth", "beta", "as_of"):
+        setattr(row, field, getattr(f, field))
+    row.source = f.source
+    row.fetched_at = utcnow()
+
+
+def get_fundamentals(db: Session, symbols: list[str]) -> dict[str, "Fundamental"]:
+    from ..models import Fundamental
+
+    if not symbols:
+        return {}
+    return {r.symbol: r for r in db.scalars(select(Fundamental).where(Fundamental.symbol.in_(symbols)))}

@@ -159,3 +159,19 @@ def test_market_wide_moves_are_discounted_and_against_market_is_flagged():
     c = assess(bars, QuoteIn(970, NOW, bars[-1].close), BaselineIn(1000, YESTERDAY_CLOSE, YESTERDAY_CLOSE),
                [LevelIn(1, 980, "below")], NOW, market_open=False, session_fraction=1.0, market_change_pct=-0.027)
     assert c.tier == "attention"
+
+
+def test_no_new_print_is_flagged_as_such_not_reported_as_a_zero_move():
+    """The distinction the UI depends on. When the latest print is not newer
+    than the baseline there is nothing to compare, and `change_pct == 0.0` is
+    an artefact of that — not a statement that the stock did not move. This
+    flag is what lets the card render "—" instead of a misleading "0.0%"."""
+    bars = make_bars(60, 1000, 0.01)
+    a = run(bars, 1000, 1000, baseline_as_of=NOW, quote_as_of=NOW)
+    assert a.same_print is True
+    assert a.z is None
+
+    # A genuinely flat but *newer* print is a real zero move, and must not be
+    # flagged — otherwise "unchanged today" would render as "no data".
+    a2 = run(bars, 1000, 1000, baseline_as_of=YESTERDAY_CLOSE, quote_as_of=NOW)
+    assert a2.same_print is False

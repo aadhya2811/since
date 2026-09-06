@@ -36,6 +36,42 @@ class QuoteData:
 
 
 @dataclass(frozen=True)
+class FundamentalsData:
+    """Company-level figures that change quarterly, not by the second.
+
+    Every field is optional and every one of them means "the vendor did not
+    give us this" when it is None. Nothing here is ever derived, filled in or
+    defaulted — a watchlist that guesses a P/E is worse than one that admits
+    it does not know.
+    """
+
+    symbol: str
+    source: str = "unknown"
+    as_of: datetime | None = None          # vendor's own "most recent quarter" stamp
+    market_cap: float | None = None
+    pe_trailing: float | None = None
+    pe_forward: float | None = None
+    price_to_book: float | None = None
+    eps_trailing: float | None = None
+    book_value: float | None = None
+    roe: float | None = None               # fraction, not percent
+    dividend_yield: float | None = None    # fraction
+    debt_to_equity: float | None = None    # vendor reports this as a percentage
+    profit_margin: float | None = None     # fraction
+    revenue_growth: float | None = None    # fraction, year on year
+    beta: float | None = None
+
+    def is_empty(self) -> bool:
+        """True when the vendor answered but told us nothing usable. Callers
+        must not store an all-None row: an empty row would look like a
+        successful fetch and stop us retrying."""
+        return all(getattr(self, f) is None for f in (
+            "market_cap", "pe_trailing", "pe_forward", "price_to_book", "eps_trailing",
+            "book_value", "roe", "dividend_yield", "debt_to_equity", "profit_margin",
+            "revenue_growth", "beta"))
+
+
+@dataclass(frozen=True)
 class BarData:
     date: date
     open: float
@@ -59,3 +95,10 @@ class MarketDataProvider(ABC):
         """Ascending daily bars, oldest first. Should exclude today's
         partial bar while the market is open (callers treat the last bar as
         a completed session)."""
+
+    async def get_fundamentals(self, symbols: list[str]) -> dict[str, FundamentalsData]:
+        """Optional. A provider that cannot supply fundamentals returns {} and
+        the app shows "not available from this feed" rather than a blank that
+        reads like a zero. Deliberately not abstract: fundamentals are a
+        garnish, and no provider should be forced to fake them."""
+        return {}

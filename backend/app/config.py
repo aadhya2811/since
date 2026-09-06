@@ -35,9 +35,23 @@ class Settings(BaseSettings):
     news_fallback_provider: str | None = "simulated"
     news_refresh_minutes: int = 30
 
+    # --- email -----------------------------------------------------------
+    # Leave smtp_host empty and the login code is shown in the app instead of
+    # emailed — that is the zero-config path, and the fallback if SMTP fails.
+    # Set these (SINCE_SMTP_HOST, SINCE_SMTP_USER, ...) to send real mail.
+    smtp_host: str = ""
+    smtp_port: int = 587
+    smtp_user: str = ""
+    smtp_password: str = ""
+    smtp_from: str = ""                       # e.g. "since@yourdomain.com"
+    smtp_from_name: str = "Since"
+    smtp_starttls: bool = True                # port 587
+    smtp_ssl: bool = False                    # port 465 instead
+    smtp_timeout_seconds: float = 10.0
+
     # --- auth ------------------------------------------------------------
-    # Dev mode returns the login code in the API response instead of emailing
-    # it. Never turn this on in a real deployment.
+    # Show the login code in the app. Forced on whenever SMTP is unconfigured
+    # (otherwise nobody could ever sign in); set false once mail is working.
     auth_dev_return_code: bool = True
     login_code_ttl_seconds: int = 600
     session_ttl_days: int = 90

@@ -3,7 +3,7 @@
  *  - the visit id (sessionStorage: a new tab / reopened browser = "came back")
  *  - optimistic concurrency: If-Match on writes, ConflictError on 409
  */
-import type { Board, Briefing, CompareOut, Level, MarketPage, NewsFeed, PinOut, SessionOut, SymbolHit, User, Watchlist } from './types'
+import type { Board, Briefing, CompareOut, Level, MarketPage, NewsFeed, PinOut, SessionOut, SymbolHit, Thesis, ThesisPage, User, Verdict, Watchlist } from './types'
 
 const BASE = (import.meta.env.VITE_API_BASE as string | undefined) ?? ''
 
@@ -52,7 +52,7 @@ async function req<T>(method: string, path: string, body?: unknown, extra: Recor
 }
 
 export const api = {
-  requestCode: (email: string) => req<{ dev_code: string | null; message: string }>('POST', '/api/auth/request-code', { email }),
+  requestCode: (email: string) => req<{ dev_code: string | null; message: string; delivery: 'email' | 'on-screen' }>('POST', '/api/auth/request-code', { email }),
   verify: (email: string, code: string, device_label: string) => req<{ token: string; user: User }>('POST', '/api/auth/verify', { email, code, device_label }),
   me: () => req<User>('GET', '/api/auth/me'),
   sessions: () => req<SessionOut[]>('GET', '/api/auth/sessions'),
@@ -76,6 +76,14 @@ export const api = {
   market: () => req<MarketPage>('GET', '/api/market'),
   compare: (symbols: string[], sessions: number) => req<CompareOut>('GET', `/api/compare?symbols=${encodeURIComponent(symbols.join(','))}&sessions=${sessions}`),
   news: (days = 7, scope: 'all' | 'following' | 'market' = 'all') => req<NewsFeed>('GET', `/api/news?days=${days}&scope=${scope}`),
+
+  theses: () => req<ThesisPage>('GET', '/api/thesis'),
+  createThesis: (symbol: string, text: string, horizon_days: number) => req<Thesis>('POST', '/api/thesis', { symbol, text, horizon_days }),
+  editThesis: (id: number, body: { text?: string; horizon_days?: number }) => req<Thesis>('PATCH', `/api/thesis/${id}`, body),
+  deleteThesis: (id: number) => req<void>('DELETE', `/api/thesis/${id}`),
+  reviewThesis: (id: number, verdict: Verdict, note: string | null) => req<Thesis>('POST', `/api/thesis/${id}/review`, { verdict, note }),
+  rewindThesis: (id: number, sessions: number) => req<Thesis>('POST', `/api/thesis/${id}/demo/rewind?sessions=${sessions}`),
+  snoozeThesis: (id: number, days = 7) => req<Thesis>('POST', `/api/thesis/${id}/snooze?days=${days}`),
 
   addLevel: (symbol: string, price: number, direction: 'above' | 'below', note: string | null) => req<Level>('POST', '/api/levels', { symbol, price, direction, note }),
   deleteLevel: (id: number) => req<void>('DELETE', `/api/levels/${id}`),

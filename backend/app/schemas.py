@@ -14,7 +14,8 @@ class RequestCodeIn(BaseModel):
 class RequestCodeOut(BaseModel):
     ok: bool = True
     message: str
-    dev_code: str | None = None  # only populated when SINCE_AUTH_DEV_RETURN_CODE=true
+    delivery: str = "on-screen"   # "email" once it actually reached an inbox
+    dev_code: str | None = None   # present whenever the code is not being emailed
 
 
 class VerifyIn(BaseModel):
@@ -140,6 +141,10 @@ class SinceOut(BaseModel):
     change_pct: float
     sessions: int
     z: float | None
+    # True when the latest print is not newer than the baseline — there is
+    # nothing to diff yet. The UI must render this as "no comparison", never
+    # as a 0.0% move: a missing input gets a missing output.
+    same_print: bool = False
     unusual: UnusualOut
     market_change_pct: float | None = None
     market_share: float | None = None
@@ -164,6 +169,100 @@ class NewsSummary(BaseModel):
     items: list[NewsOut]
 
 
+# ------------------------------------------------------- analyst memory
+
+
+class ThesisCreate(BaseModel):
+    symbol: str = Field(min_length=1, max_length=32)
+    text: str = Field(min_length=3, max_length=2000)
+    horizon_days: int = Field(default=90, ge=7, le=1095)
+
+
+class ThesisPatch(BaseModel):
+    text: str | None = Field(default=None, min_length=3, max_length=2000)
+    horizon_days: int | None = Field(default=None, ge=7, le=1095)
+
+
+class ReviewCreate(BaseModel):
+    verdict: str = Field(pattern="^(holds|weakened|broken)$")
+    note: str | None = Field(default=None, max_length=2000)
+
+
+class ReviewOut(BaseModel):
+    id: int
+    verdict: str
+    note: str | None
+    trigger: str
+    trigger_text: str | None
+    price_at_review: float | None
+    change_pct: float | None
+    sessions: int | None
+    created_at: datetime
+
+
+class ThesisOut(BaseModel):
+    id: int
+    symbol: str
+    name: str
+    text: str
+    status: str
+    created_at: datetime
+    anchored_at: datetime
+    age_label: str
+    anchor_price: float | None
+    price: float | None
+    change_pct: float | None
+    sessions: int
+    z: float | None
+    review_due: bool
+    trigger: str | None
+    trigger_text: str | None
+    review_count: int
+    last_verdict: str | None
+    last_reviewed_at: datetime | None
+    horizon_days: int
+    reviews: list[ReviewOut] = []
+
+
+class ThesisRecord(BaseModel):
+    reviews: int
+    holds: int
+    weakened: int
+    broken: int
+    hold_rate: float | None
+
+
+class ThesisPageOut(BaseModel):
+    generated_at: datetime
+    record: ThesisRecord
+    due: list[ThesisOut]
+    open: list[ThesisOut]
+    closed: list[ThesisOut]
+
+
+class FundamentalsOut(BaseModel):
+    """Quarterly company figures. Every field is optional, and None always
+    means *the vendor did not give us this* — never zero. `source` and
+    `fetched_at` are part of the payload on purpose: a P/E you cannot trace
+    is a P/E you have to take on faith."""
+
+    source: str
+    fetched_at: datetime
+    as_of: datetime | None = None
+    market_cap: float | None = None
+    pe_trailing: float | None = None
+    pe_forward: float | None = None
+    price_to_book: float | None = None
+    eps_trailing: float | None = None
+    book_value: float | None = None
+    roe: float | None = None
+    dividend_yield: float | None = None
+    debt_to_equity: float | None = None
+    profit_margin: float | None = None
+    revenue_growth: float | None = None
+    beta: float | None = None
+
+
 class BriefingItem(BaseModel):
     symbol: str
     pinned: bool = False
@@ -185,6 +284,10 @@ class BriefingItem(BaseModel):
     levels: list[LevelOut]
     levels_crossed: list[int]
     news: NewsSummary
+    thesis: ThesisOut | None = None   # the reason you were interested, if you wrote one
+    # None = we have not fetched them; a row with source "none" = we asked and
+    # the vendor declined. The UI says something different for each.
+    fundamentals: FundamentalsOut | None = None
 
 
 class MarketOut(BaseModel):
@@ -207,6 +310,9 @@ class BriefingSummary(BaseModel):
     quiet: int
     missing: int
     headline: str
+    theses_due: int = 0          # reasons worth re-reading, given what happened
+    theses_open: int = 0
+    net_change_pct: float | None = None   # equal-weighted move of this list since you looked
 
 
 class BriefingOut(BaseModel):
@@ -218,6 +324,7 @@ class BriefingOut(BaseModel):
     market: MarketOut
     data: DataStatus
     summary: BriefingSummary
+    indices: list[IndexOut] = []      # the command-strip: what the market itself did
     items: list[BriefingItem]
 
 

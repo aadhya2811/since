@@ -11,13 +11,38 @@ export interface QuoteOut {
 export interface Unusual { label: 'Unchanged' | 'Ordinary' | 'Notable' | 'Rare' | 'Extreme'; text: string; z: number | null; typical_move_pct: number; typical_window_pct: number | null }
 export interface SinceOut {
   baseline_price: number; baseline_as_of: string; seen_at: string; seen_label: string
-  change_abs: number; change_pct: number; sessions: number; z: number | null; unusual: Unusual
+  change_abs: number; change_pct: number; sessions: number; z: number | null; same_print: boolean; unusual: Unusual
 }
 export interface Reason { kind: string; severity: 'high' | 'medium' | 'low'; text: string }
 export interface Level { id: number; symbol: string; price: number; direction: 'above' | 'below'; note: string | null; created_at: string }
 export interface NewsOut { title: string; url: string; source: string; published_at: string; is_new: boolean }
 
 export type Tier = 'attention' | 'notable' | 'quiet'
+export type Verdict = 'holds' | 'weakened' | 'broken'
+
+export interface ThesisReview {
+  id: number; verdict: Verdict; note: string | null; trigger: string; trigger_text: string | null
+  price_at_review: number | null; change_pct: number | null; sessions: number | null; created_at: string
+}
+export interface Thesis {
+  id: number; symbol: string; name: string; text: string; status: 'open' | 'closed'
+  created_at: string; anchored_at: string; age_label: string
+  anchor_price: number | null; price: number | null; change_pct: number | null
+  sessions: number; z: number | null
+  review_due: boolean; trigger: string | null; trigger_text: string | null
+  review_count: number; last_verdict: Verdict | null; last_reviewed_at: string | null
+  horizon_days: number; reviews: ThesisReview[]
+}
+export interface ThesisRecord { reviews: number; holds: number; weakened: number; broken: number; hold_rate: number | null }
+export interface ThesisPage { generated_at: string; record: ThesisRecord; due: Thesis[]; open: Thesis[]; closed: Thesis[] }
+
+export interface Fundamentals {
+  source: string; fetched_at: string; as_of: string | null
+  market_cap: number | null; pe_trailing: number | null; pe_forward: number | null
+  price_to_book: number | null; eps_trailing: number | null; book_value: number | null
+  roe: number | null; dividend_yield: number | null; debt_to_equity: number | null
+  profit_margin: number | null; revenue_growth: number | null; beta: number | null
+}
 
 export interface BriefingItem {
   symbol: string; pinned: boolean; watchlist_id: number | null; name: string; sector: string | null; tier: Tier; score: number
@@ -25,13 +50,16 @@ export interface BriefingItem {
   volume_ratio: number | null; range_position_52w: number | null; high_52w: number | null; low_52w: number | null
   sigma_daily: number | null; streak: number; sparkline: number[]; levels: Level[]; levels_crossed: number[]
   news: { new_count: number; items: NewsOut[] }
+  thesis: Thesis | null
+  fundamentals: Fundamentals | null
 }
 
 export interface Briefing {
   watchlist_id: number; watchlist_version: number; generated_at: string; new_visit: boolean; first_visit: boolean
   market: { is_open: boolean; phase: string; session_date: string; last_close: string; next_open: string }
   data: { active_provider: string; degraded: boolean; note: string | null }
-  summary: { attention: number; notable: number; quiet: number; missing: number; headline: string }
+  summary: { attention: number; notable: number; quiet: number; missing: number; headline: string; theses_due: number; theses_open: number; net_change_pct: number | null }
+  indices: IndexOut[]
   items: BriefingItem[]
 }
 

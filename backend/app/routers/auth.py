@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, Request
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
@@ -13,13 +13,22 @@ router = APIRouter(prefix="/auth", tags=["auth"])
 
 
 @router.post("/request-code", response_model=schemas.RequestCodeOut)
-def request_code(body: schemas.RequestCodeIn, db: Session = Depends(get_db)):
-    code = auth.request_code(db, body.email)
-    return schemas.RequestCodeOut(
-        message="Check your email for a 6-digit code." if not settings.auth_dev_return_code
-        else "Dev mode: code returned in response.",
-        dev_code=code if settings.auth_dev_return_code else None,
-    )
+async def request_code(body: schemas.RequestCodeIn, request: Request, db: Session = Depends(get_db)):
+    mailer: auth.Mailer = request.app.state.mailer
+    code, sent = await auth.request_code(db, body.email, mailer)
+    # The code is shown in the app unless it actually reached an inbox. If SMTP
+    # is configured but the send failed, showing it is what keeps sign-in
+    # working — and the message says which happened, rather than claiming an
+    # email is on its way when it isn't.
+    show = settings.auth_dev_return_code or not sent.delivered
+    if sent.delivered:
+        message = f"Code sent to {body.email}. It expires in {max(1, settings.login_code_ttl_seconds // 60)} minutes."
+    elif sent.error:
+        message = "Couldn't reach the mail server, so here's your code directly."
+    else:
+        message = "Email isn't configured on this server, so here's your code."
+    return schemas.RequestCodeOut(message=message, dev_code=code if show else None,
+                                  delivery="email" if sent.delivered else "on-screen")
 
 
 @router.post("/verify", response_model=schemas.TokenOut)

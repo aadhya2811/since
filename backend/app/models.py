@@ -123,6 +123,60 @@ class PriceLevel(Base):
     triggered_at: Mapped[datetime | None] = mapped_column(DateTime)
 
 
+class Thesis(Base):
+    """Why the user got interested in a stock, in their own words, timestamped.
+
+    The rest of the app answers "what changed since you last looked?". This
+    answers the question one level up: "is the reason you were interested still
+    true?". It is the same diff, on a different clock — the baseline here is
+    the price when you wrote the thesis (or when you last reviewed it), and the
+    trigger for re-asking is a *material* change, not merely a new visit.
+
+    One open thesis per user+symbol. Superseded ones stay for the history.
+    """
+
+    __tablename__ = "theses"
+    __table_args__ = (Index("ix_thesis_user_symbol", "user_id", "symbol"),)
+    id: Mapped[int] = mapped_column(primary_key=True)
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), index=True)
+    symbol: Mapped[str] = mapped_column(String(32))
+    text: Mapped[str] = mapped_column(Text)
+    horizon_days: Mapped[int] = mapped_column(Integer, default=90)  # ask me again by then regardless
+    status: Mapped[str] = mapped_column(String(16), default="open")  # open | closed
+    # The anchor: price at the moment the thesis was written or last reviewed.
+    # Reviews move it forward, so "since you last thought about this" stays true.
+    anchor_price: Mapped[float | None] = mapped_column(Float)
+    anchor_as_of: Mapped[datetime | None] = mapped_column(DateTime)
+    anchored_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
+    closed_at: Mapped[datetime | None] = mapped_column(DateTime)
+    # Set when the user answers a prompt; cleared when a fresh trigger fires.
+    snoozed_until: Mapped[datetime | None] = mapped_column(DateTime)
+
+    reviews: Mapped[list[ThesisReview]] = relationship(
+        back_populates="thesis", cascade="all, delete-orphan", order_by="ThesisReview.created_at.desc()"
+    )
+
+
+class ThesisReview(Base):
+    """One answer to "does this still hold?", with the price context at the
+    time so the record is auditable after the fact."""
+
+    __tablename__ = "thesis_reviews"
+    id: Mapped[int] = mapped_column(primary_key=True)
+    thesis_id: Mapped[int] = mapped_column(ForeignKey("theses.id", ondelete="CASCADE"), index=True)
+    verdict: Mapped[str] = mapped_column(String(16))     # holds | weakened | broken
+    note: Mapped[str | None] = mapped_column(Text)
+    trigger: Mapped[str] = mapped_column(String(16), default="manual")  # move | range | news | time | manual
+    trigger_text: Mapped[str | None] = mapped_column(String(300))
+    price_at_review: Mapped[float | None] = mapped_column(Float)
+    change_pct: Mapped[float | None] = mapped_column(Float)   # vs the anchor being reviewed
+    sessions: Mapped[int | None] = mapped_column(Integer)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
+
+    thesis: Mapped[Thesis] = relationship(back_populates="reviews")
+
+
 class Baseline(Base):
     """What this user last *saw* for a symbol. The diff engine compares the
     current quote against this, not against yesterday's close.
@@ -179,6 +233,35 @@ class Quote(Base):
     fetched_at: Mapped[datetime] = mapped_column(DateTime)  # when we received it
     source: Mapped[str] = mapped_column(String(24))
     delay_minutes: Mapped[int | None] = mapped_column(Integer)  # vendor-declared lag
+
+
+class Fundamental(Base):
+    """Company figures that move quarterly, cached per symbol like any other
+    market data — one fetch serves every user watching that stock.
+
+    Every column is nullable and a NULL means "the vendor did not tell us",
+    never zero. `source` and `fetched_at` travel with the row so the UI can
+    show where a P/E came from and how old it is, which is the difference
+    between a number you can check and a number you have to trust.
+    """
+
+    __tablename__ = "fundamentals"
+    symbol: Mapped[str] = mapped_column(String(32), primary_key=True)
+    market_cap: Mapped[float | None] = mapped_column(Float)
+    pe_trailing: Mapped[float | None] = mapped_column(Float)
+    pe_forward: Mapped[float | None] = mapped_column(Float)
+    price_to_book: Mapped[float | None] = mapped_column(Float)
+    eps_trailing: Mapped[float | None] = mapped_column(Float)
+    book_value: Mapped[float | None] = mapped_column(Float)
+    roe: Mapped[float | None] = mapped_column(Float)
+    dividend_yield: Mapped[float | None] = mapped_column(Float)
+    debt_to_equity: Mapped[float | None] = mapped_column(Float)
+    profit_margin: Mapped[float | None] = mapped_column(Float)
+    revenue_growth: Mapped[float | None] = mapped_column(Float)
+    beta: Mapped[float | None] = mapped_column(Float)
+    as_of: Mapped[datetime | None] = mapped_column(DateTime)   # vendor's most-recent-quarter stamp
+    fetched_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
+    source: Mapped[str] = mapped_column(String(24), default="unknown")
 
 
 class DailyBar(Base):

@@ -12,8 +12,9 @@ from fastapi.staticfiles import StaticFiles
 
 from .config import settings
 from .db import init_db
+from .mailer import Mailer
 from .market.service import MarketService, build_news_chain, build_provider
-from .routers import auth, briefing, misc, watchlists
+from .routers import auth, briefing, misc, thesis, watchlists
 
 logging.basicConfig(level=settings.log_level, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
 logging.getLogger("httpx").setLevel(logging.WARNING)   # one line per request is noise, not signal
@@ -26,10 +27,13 @@ def create_app(market: MarketService | None = None) -> FastAPI:
         init_db()
         svc = market or MarketService(build_provider(settings), settings, build_news_chain(settings))
         app.state.market = svc
+        app.state.mailer = Mailer(settings)
         svc.start()
         logging.getLogger("since").info(
-            "Since is up · prices: %s (fallback: %s) · news: %s · db: %s",
-            settings.provider, settings.fallback_provider or "none", settings.news_provider or "off", settings.database_url,
+            "Since is up · prices: %s (fallback: %s) · news: %s · email: %s · db: %s",
+            settings.provider, settings.fallback_provider or "none", settings.news_provider or "off",
+            f"smtp {settings.smtp_host}" if app.state.mailer.configured else "on-screen codes",
+            settings.database_url,
         )
         try:
             yield
@@ -41,7 +45,7 @@ def create_app(market: MarketService | None = None) -> FastAPI:
         CORSMiddleware, allow_origins=settings.cors_origins, allow_origin_regex=r"https://.*\.(vercel\.app|onrender\.com|netlify\.app)",
         allow_credentials=False, allow_methods=["*"], allow_headers=["*"],
     )
-    for r in (auth.router, watchlists.router, briefing.router, misc.router):
+    for r in (auth.router, watchlists.router, briefing.router, thesis.router, misc.router):
         app.include_router(r, prefix="/api")
 
     # Serve the built frontend if it exists, so one process = the whole app.

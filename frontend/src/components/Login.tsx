@@ -6,6 +6,8 @@ export function Login({ onLogin }: { onLogin: (u: User) => void }) {
   const [email, setEmail] = useState('')
   const [code, setCode] = useState('')
   const [devCode, setDevCode] = useState<string | null>(null)
+  const [notice, setNotice] = useState<string>('')
+  const [emailed, setEmailed] = useState(false)
   const [stage, setStage] = useState<'email' | 'code'>('email')
   const [device, setDevice] = useState(deviceLabel())
   const [err, setErr] = useState<string | null>(null)
@@ -15,7 +17,7 @@ export function Login({ onLogin }: { onLogin: (u: User) => void }) {
     e.preventDefault(); setErr(null); setBusy(true)
     try {
       const r = await api.requestCode(email.trim())
-      setDevCode(r.dev_code); setStage('code')
+      setDevCode(r.dev_code); setNotice(r.message); setEmailed(r.delivery === 'email'); setStage('code')
       if (r.dev_code) setCode(r.dev_code)
     } catch (ex) { setErr((ex as Error).message) } finally { setBusy(false) }
   }
@@ -43,10 +45,14 @@ export function Login({ onLogin }: { onLogin: (u: User) => void }) {
         <form onSubmit={verify}>
           {devCode ? (
             <>
-              <div className="hint">Dev mode — no email is sent. Your code:</div>
+              <div className="hint">{notice}</div>
               <div className="code">{devCode}</div>
             </>
-          ) : <div className="hint">We sent a 6-digit code to {email}.</div>}
+          ) : (
+            <div className="hint">
+              {emailed ? <>📬 {notice}<br />Check your inbox — and the spam folder, just in case.</> : notice}
+            </div>
+          )}
           <input className="input" inputMode="numeric" placeholder="6-digit code" value={code} onChange={e => setCode(e.target.value)} autoFocus />
           <button className="btn primary" disabled={busy}>Sign in</button>
           <button type="button" className="btn ghost" onClick={() => setStage('email')}>Use a different email</button>

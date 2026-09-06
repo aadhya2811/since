@@ -9,9 +9,10 @@ from sqlalchemy.orm import Session
 
 from .. import schemas
 from ..market import calendar as cal
-from ..market.store import close_on_or_before, get_bars, get_bars_many, get_news_many, get_quotes
+from ..market.store import close_on_or_before, get_bars, get_bars_many, get_fundamentals, get_news_many, get_quotes
 from ..models import Pin, PriceLevel, Quote, SymbolMeta, User, Watchlist, WatchlistItem
 from . import baselines as bl
+from . import thesis as th
 from .significance import Bar, BaselineIn, LevelIn, QuoteIn, assess, describe_unusual, humanize_since
 
 TIER_ORDER = {"attention": 0, "notable": 1, "quiet": 2}
@@ -98,10 +99,26 @@ def build_briefing(
     symbols = [it.symbol for it in wl.items]
     items, counts, missing, any_change, first_visit = assess_symbols(db, user, symbols, now, state)
 
+    # Analyst memory: your own reasons, and whether anything happened that is
+    # worth re-reading them against.
+    views = {v.symbol: v for v in th.load_views(db, user.id, now, symbols=symbols)}
+    for it in items:
+        v = views.get(it.symbol)
+        if v is not None:
+            it.thesis = th.to_out(v)
+    due = sum(1 for v in views.values() if v.review_due)
+
+    # Only holdings that actually have something new to compare contribute to
+    # the net. Averaging in a pile of "no new print" zeros would drag the
+    # number toward nought and make a closed market look like a flat one.
+    moves = [i.since.change_pct for i in items if i.since is not None and not i.since.same_print]
+    net = sum(moves) / len(moves) if moves else None
+
     note = None
     if data_status.get("degraded"):
         note = f"Primary feed unavailable — showing {data_status.get('active')} data."
     return schemas.BriefingOut(
+        indices=index_strip(db, now, state),
         watchlist_id=wl.id,
         watchlist_version=wl.version,
         generated_at=now,
@@ -112,10 +129,33 @@ def build_briefing(
         data=schemas.DataStatus(active_provider=data_status.get("active", "unknown"),
                                 degraded=bool(data_status.get("degraded")), note=note),
         summary=schemas.BriefingSummary(**counts, missing=missing,
+                                        theses_due=due, theses_open=len(views), net_change_pct=net,
                                         headline=headline(counts["attention"], counts["notable"], counts["quiet"],
                                                           missing, new_visit, any_change)),
         items=items,
     )
+
+
+def index_strip(db: Session, now: datetime, state: cal.MarketState) -> list[schemas.IndexOut]:
+    """The two index tiles at the top of the command strip. Cheap: they are
+    already tracked for the market-relative scoring, so this is two lookups."""
+    from .analytics import INDICES, _closes, _ret
+
+    out: list[schemas.IndexOut] = []
+    for sym in INDICES:
+        meta = db.get(SymbolMeta, sym)
+        q = db.get(Quote, sym)
+        bars = get_bars(db, sym, limit=40)
+        if q is None and not bars:
+            continue
+        pts = _closes(bars, q, state.is_open)
+        out.append(schemas.IndexOut(
+            symbol=sym, name=meta.name if meta else sym,
+            price=pts[-1][1] if pts else None,
+            ret_1d=_ret(pts, 1), ret_5d=_ret(pts, 5), ret_20d=_ret(pts, 20),
+            sparkline=[p for _, p in pts[-30:]],
+        ))
+    return out
 
 
 def build_board(db: Session, user: User, now: datetime) -> schemas.BoardOut:
@@ -151,6 +191,7 @@ def assess_symbols(db: Session, user: User, symbols: list[str], now: datetime, s
     first_visit = bool(symbols) and not baselines
     frac = cal.session_fraction_elapsed(now)
     news_by = get_news_many(db, symbols, since=now - timedelta(days=7))
+    funda_by = get_fundamentals(db, symbols)
     # The market itself, for "how much of this move is just Nifty?"
     index_q = db.get(Quote, MARKET_INDEX)
     index_bars = get_bars(db, MARKET_INDEX, limit=80) if index_q else []
@@ -177,7 +218,17 @@ def assess_symbols(db: Session, user: User, symbols: list[str], now: datetime, s
         spark = [b.close for b in bars[-30:]]
         lv_out = [schemas.LevelOut(id=l.id, symbol=l.symbol, price=l.price, direction=l.direction, note=l.note,
                                    created_at=l.created_at) for l in levels_by[sym]]
-        common = dict(symbol=sym, name=name, sector=sector, pinned=sym in pinned, watchlist_id=home.get(sym))
+        f = funda_by.get(sym)
+        funda_out = None
+        if f is not None and f.source != "none":
+            funda_out = schemas.FundamentalsOut(
+                source=f.source, fetched_at=f.fetched_at, as_of=f.as_of, market_cap=f.market_cap,
+                pe_trailing=f.pe_trailing, pe_forward=f.pe_forward, price_to_book=f.price_to_book,
+                eps_trailing=f.eps_trailing, book_value=f.book_value, roe=f.roe,
+                dividend_yield=f.dividend_yield, debt_to_equity=f.debt_to_equity,
+                profit_margin=f.profit_margin, revenue_growth=f.revenue_growth, beta=f.beta)
+        common = dict(symbol=sym, name=name, sector=sector, pinned=sym in pinned, watchlist_id=home.get(sym),
+                      fundamentals=funda_out)
 
         if q is None:
             missing += 1
@@ -226,7 +277,7 @@ def assess_symbols(db: Session, user: User, symbols: list[str], now: datetime, s
                                    freshness=freshness(q, now, state)),
             since=schemas.SinceOut(baseline_price=b_in.price, baseline_as_of=b_in.as_of, seen_at=b_in.seen_at,
                                    seen_label=humanize_since(b_in.seen_at, now), change_abs=a.change_abs,
-                                   change_pct=a.change_pct, sessions=a.sessions, z=a.z,
+                                   change_pct=a.change_pct, sessions=a.sessions, z=a.z, same_print=a.same_print,
                                    unusual=schemas.UnusualOut(label=u_label, text=u_text, z=a.z, typical_move_pct=a.sigma_daily,
                                                               typical_window_pct=u_window),
                                    market_change_pct=a.market_change_pct, market_share=a.market_share),

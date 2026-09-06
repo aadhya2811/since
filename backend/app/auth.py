@@ -12,38 +12,49 @@ does not leak sessions.
 from __future__ import annotations
 
 import logging
-from datetime import timedelta
+from datetime import datetime, timedelta
 
 from fastapi import Depends, Header, HTTPException, status
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from .config import settings
 from .db import get_db
+from .mailer import Mailer, SendResult
 from .models import LoginCode, User, UserSession
 from .util import random_code, random_token, sha256, utcnow
 
 log = logging.getLogger(__name__)
 
 MAX_CODE_ATTEMPTS = 5
+MAX_CODES_PER_HOUR = 6      # per address: enough for a fumbled sign-in, not enough to spam someone
 
 
-def send_code(email: str, code: str) -> None:
-    """Seam for an email provider. Dev: log it."""
-    log.info("LOGIN CODE for %s: %s", email, code)
+def rate_limited(db: Session, email: str, now: datetime) -> bool:
+    """Anyone can type anyone's address into a login box. Cap how many emails
+    that can generate, or the form becomes a free mailer for a stranger."""
+    recent = db.scalar(
+        select(func.count()).select_from(LoginCode)
+        .where(LoginCode.email == email, LoginCode.expires_at > now - timedelta(hours=1))
+    )
+    return (recent or 0) >= MAX_CODES_PER_HOUR
 
 
-def request_code(db: Session, email: str) -> str:
+async def request_code(db: Session, email: str, mailer: Mailer) -> tuple[str, SendResult]:
     email = email.lower().strip()
+    now = utcnow()
+    if rate_limited(db, email, now):
+        raise HTTPException(status.HTTP_429_TOO_MANY_REQUESTS,
+                            "Too many codes requested for this address. Try again in an hour.")
     # Invalidate earlier unused codes so only the newest works.
     for old in db.scalars(select(LoginCode).where(LoginCode.email == email, LoginCode.used.is_(False))):
         old.used = True
     code = random_code()
     db.add(LoginCode(email=email, code_hash=sha256(code),
-                     expires_at=utcnow() + timedelta(seconds=settings.login_code_ttl_seconds)))
+                     expires_at=now + timedelta(seconds=settings.login_code_ttl_seconds)))
     db.commit()
-    send_code(email, code)
-    return code
+    result = await mailer.send_login_code(email, code)
+    return code, result
 
 
 def verify_code(db: Session, email: str, code: str, device_label: str) -> tuple[str, User]:

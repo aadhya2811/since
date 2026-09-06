@@ -1,11 +1,14 @@
 import { useState } from 'react'
 import type { BriefingItem, Reason } from '../types'
-import { ago, compact, dateTimeIST, inr, pct, sign } from '../format'
+import { ago, compact, dateTimeIST, inr, pct, sign, sincePct } from '../format'
 import { Sparkline } from './Sparkline'
+import { ThesisBlock } from './ThesisBlock'
+import { FundamentalsBlock } from './FundamentalsBlock'
 
 interface Props {
   item: BriefingItem
   expanded: boolean
+  onThesisChanged: () => Promise<void> | void
   onToggle: () => void
   onAck: (symbol: string) => Promise<void>
   onRemove: (symbol: string) => Promise<void>
@@ -54,6 +57,7 @@ export function StockCard(p: Props) {
                     onClick={e => { e.stopPropagation(); p.onTogglePin(item.symbol, !item.pinned) }}>{item.pinned ? '★ pinned' : '☆ pin'}</button>
             {q && <span className={`badge ${q.freshness.status}`}>{q.freshness.label}</span>}
             {item.news.new_count > 0 && <span className="badge new">{item.news.new_count} new {item.news.new_count === 1 ? 'headline' : 'headlines'}</span>}
+            {item.thesis?.review_due && <span className="badge ask" title={item.thesis.trigger_text ?? ''}>does your reason still hold?</span>}
           </div>
           <div className="name">{item.name}{item.sector ? ` · ${item.sector}` : ''}</div>
         </div>
@@ -67,8 +71,8 @@ export function StockCard(p: Props) {
         <div className="sincecol num">
           {s ? (
             <>
-              <div className={`big ${dir}`}>{pct(s.change_pct)}</div>
-              <div className="lbl">since {s.seen_label}{s.z != null && Math.abs(s.z) >= 0.05 ? ` · ${Math.abs(s.z).toFixed(1)}σ` : ''}</div>
+              <div className={`big ${s.same_print ? 'flat' : dir}`}>{sincePct(s.change_pct, s.same_print)}</div>
+              <div className="lbl">{s.same_print ? 'nothing new yet' : <>since {s.seen_label}{s.z != null && Math.abs(s.z) >= 0.05 ? ` · ${Math.abs(s.z).toFixed(1)}σ` : ''}</>}</div>
             </>
           ) : <div className="lbl">—</div>}
         </div>
@@ -86,7 +90,9 @@ export function StockCard(p: Props) {
             <h4>Since you looked <span className="faint" style={{ fontWeight: 400, letterSpacing: 0, textTransform: 'none' }}>· hover a label for what it means</span></h4>
             <div className="kv">
               <span className="k" title={HELP.saw}>You last saw</span><span className="num">{inr(s.baseline_price)} <span className="faint">({dateTimeIST(s.baseline_as_of)} IST)</span></span>
-              <span className="k" title={HELP.now}>Now</span><span className="num">{inr(q.price)} <span className={dir}>{pct(s.change_pct)}</span> <span className="faint">over {s.sessions} session{s.sessions === 1 ? '' : 's'}</span></span>
+              <span className="k" title={HELP.now}>Now</span><span className="num">{inr(q.price)} {s.same_print
+                ? <span className="faint">— same print you already saw, so there is nothing to compare yet</span>
+                : <><span className={dir}>{pct(s.change_pct)}</span> <span className="faint">over {s.sessions} session{s.sessions === 1 ? '' : 's'}</span></>}</span>
               <span className="k" title={HELP.unusual}>How unusual</span>
               <span className="unusual">
                 <span className={`ulabel ${s.unusual.label}`}>{s.unusual.label}</span>
@@ -143,6 +149,10 @@ export function StockCard(p: Props) {
             </div>
           </div>
 
+          <FundamentalsBlock f={item.fundamentals} />
+
+          <ThesisBlock symbol={item.symbol} thesis={item.thesis} onChanged={p.onThesisChanged} />
+
           <div className="detail-actions">
             <button className="btn ghost sm danger" onClick={() => p.onRemove(item.symbol)}>Remove from watchlist</button>
             <button className="btn sm" onClick={() => p.onAck(item.symbol)} title="Reset the baseline to now: next time, you'll see what changed from here">Seen it ✓</button>
@@ -163,7 +173,7 @@ export function QuietRow({ item, onClick }: { item: BriefingItem; onClick: () =>
       <span className={`n ${err ? 'error' : ''}`}>{err ? err.text : move ? move.text : item.reasons[0]?.text ?? item.name}</span>
       <span className="spark"><Sparkline data={item.sparkline} width={70} height={22} baseline={s?.baseline_price ?? null} /></span>
       <span className="num muted" style={{ width: 80, textAlign: 'right' }}>{inr(q?.price)}</span>
-      <span className={`num ${sign(s?.change_pct)}`} style={{ width: 60, textAlign: 'right' }}>{pct(s?.change_pct)}</span>
+      <span className={`num ${s?.same_print ? 'flat' : sign(s?.change_pct)}`} style={{ width: 60, textAlign: 'right' }}>{sincePct(s?.change_pct, s?.same_print)}</span>
     </div>
   )
 }

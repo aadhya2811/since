@@ -31,6 +31,7 @@ def health(request: Request, db: Session = Depends(get_db)):
         "time": now,
         "market": {"is_open": st.is_open, "phase": st.phase, "session_date": st.session_date.isoformat()},
         "data": request.app.state.market.status(),
+        "email": request.app.state.mailer.status(),
         "tracked_symbols": db.scalar(select(func.count(func.distinct(WatchlistItem.symbol)))),
         "symbols_with_history": db.scalar(select(func.count()).select_from(SymbolMeta).where(SymbolMeta.bars_refreshed_at.is_not(None))),
         "newest_quote_fetched_at": newest,

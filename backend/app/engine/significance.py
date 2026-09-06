@@ -89,6 +89,7 @@ class Assessment:
     reasons: list[Reason] = field(default_factory=list)
     levels_crossed: list[int] = field(default_factory=list)  # PriceLevel ids
     low_history: bool = False
+    same_print: bool = False         # nothing new to diff against: not a zero move
     market_change_pct: float | None = None   # index move over the same window
     market_share: float | None = None        # fraction of this move explained by the market (0..1)
 
@@ -370,6 +371,7 @@ def assess(
         reasons=reasons,
         levels_crossed=crossed,
         low_history=low_hist,
+        same_print=same_print,
         market_change_pct=market_change_pct,
         market_share=market_share,
     )

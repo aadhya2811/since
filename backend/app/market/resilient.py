@@ -19,7 +19,7 @@ import logging
 import time
 from dataclasses import dataclass, field
 
-from .provider import BarData, MarketDataProvider, ProviderError, QuoteData, SymbolNotFound
+from .provider import BarData, MarketDataProvider, ProviderError, QuoteData, SymbolNotFound, FundamentalsData
 
 log = logging.getLogger(__name__)
 
@@ -101,6 +101,21 @@ class ResilientProvider(MarketDataProvider):
 
     async def get_daily_bars(self, symbol: str, days: int = 365) -> list[BarData]:
         return await self._run("get_daily_bars", symbol, days)
+
+    async def get_fundamentals(self, symbols: list[str]) -> dict[str, FundamentalsData]:
+        """Fundamentals are optional garnish, so they must never influence the
+        breaker: a vendor that serves prices perfectly but has revoked its
+        fundamentals token is not a failing provider, and failing over the
+        whole chain because a P/E is missing would be exactly backwards."""
+        for p in self.chain:
+            try:
+                got = await p.get_fundamentals(symbols)
+            except ProviderError as e:
+                log.info("fundamentals unavailable from %s: %s", p.name, e)
+                continue
+            if got:
+                return got
+        return {}
 
     def status(self) -> dict:
         primary = self.chain[0].name

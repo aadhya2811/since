@@ -20,7 +20,7 @@ The moment a visit starts, the briefing pops up as a summary — and on a first 
 
 ![What's new popup](docs/screenshot-whatsnew.png)
 
-Built end-to-end: FastAPI + SQLite backend, React/TypeScript frontend, real market data (Yahoo Finance, ~15 min delayed for NSE) with a deterministic simulated feed for tests and offline demos, and free news via Google News RSS. 38 backend tests. One container.
+Built end-to-end: FastAPI + SQLite backend, React/TypeScript frontend, real market data (Yahoo Finance, ~15 min delayed for NSE) with a deterministic simulated feed for tests and offline demos, and free news via Google News RSS. 44 backend tests. One container.
 
 ---
 
@@ -34,7 +34,7 @@ Built end-to-end: FastAPI + SQLite backend, React/TypeScript frontend, real mark
 6. [Edge cases and failure modes](#6-edge-cases-and-failure-modes)
 7. [Scaling](#7-scaling)
 8. [What I deliberately did not build](#8-what-i-deliberately-did-not-build)
-9. [Testing](#9-testing)
+9. [Testing](#9-testing) · [full test report](docs/TEST_REPORT.md)
 10. [API](#10-api)
 11. [Next steps](#11-next-steps)
 
@@ -65,12 +65,18 @@ Everything else — auth, sync, resilience, scaling — exists to make those thr
 - **Honest about data.** Provider name and delay in the status strip; a banner if the primary feed is down and you're seeing fallback data; stale prices shown greyed, never hidden.
 - **Time-travel demo control.** "Pretend I last looked 3 sessions ago." The core feature is invisible to a first-time visitor (no history yet) — this makes it visible in one click.
 
+**Fundamentals, where the feed will give them.** Market cap, trailing and forward P/E, P/B, EPS, ROE, profit margin, revenue growth, debt/equity, dividend yield and beta, on every card, with the quarter they were reported for and the source beside them. This is the one part of the app that depends on an endpoint the vendor actively gates (Yahoo serves fundamentals behind a cookie-and-crumb handshake), so it is built to fail loudly rather than quietly: no crumb means the card says the figures aren't available, and a field the vendor omits renders as **—**, never as `0.0`. A loss-making company genuinely has no trailing P/E, and printing a zero there would be the most misleading thing this app could do. Run `python scripts/check_fundamentals.py` to see what a given network actually gets. See §5.11.
+
+**Analyst memory — why you were interested, and whether it still holds.** The rest of the app answers *what changed since you last looked?*. This answers the question one level up. Write the reason you got interested in a stock, in one sentence, in your own words. Since timestamps it, anchors it to the price at that moment, and then leaves you alone — until something happens that has earned the right to interrupt: a statistically rare move, a *materially* large one, a 52-week breach, a burst of coverage, or the horizon you set. Then it shows your own words back to you, above the price, and asks whether they still hold. You answer *still holds / weaker now / it broke*; the answer is recorded with the price context, and the anchor moves forward. Over time the Memory page shows the number almost nobody keeps on themselves: **how often your reasons survived contact with the market** — which, unlike P&L, does not conflate being right with being lucky. See §5.10.
+
 Three more pages, all built on data already in the database — no extra vendors, no API keys:
 
 - **News** — a real news page, not a per-stock log. Three streams share one pipeline: **market-wide topics** (Nifty/Sensex, RBI & SEBI policy, FII/DII flows, IPOs) stored under pseudo-symbols like `^MARKET`; the **companies you follow**; and the **index heavyweights** you don't, fetched regardless so the feed has substance on day one. Filter with one control — Everything / My stocks / Market — then narrow to a single topic or ticker. "New" is measured against the same baseline the briefing uses, so a headline is new because *you* haven't seen it, not because it is recent. Lead story, card grid, publisher monograms (Google News RSS carries no images, so identity is typographic), and de-duplication when the same story files under two symbols.
 - **Compare** — 2–6 stocks on one chart, indexed to 100 so the lines are actually comparable, plus volatility, max drawdown, 52-week position, average volume, and a correlation matrix of daily moves.
+- **Memory** — every reason you have written, the ones the market is currently asking about, the closed ones kept on purpose (a thesis that broke is the most useful one to re-read), and your record across all of them.
 - **Market** — what moved across ~60 large NSE names: index tiles, sector performance, biggest gainers/losers, the *most unusual* moves (σ-ranked, not %-ranked), and 52-week breaches. Every row has "+ watch" to pull it onto your list.
 
+![Memory page](docs/screenshot-memory.png)
 ![News page](docs/screenshot-news.png)
 ![Compare page](docs/screenshot-compare.png)
 ![Market page](docs/screenshot-market.png)
@@ -233,19 +239,31 @@ The Market page extends the same idea outward: sector aggregates answer "is this
 - **An LLM chatbot for "ask about stocks."** It needs an API key nobody reviewing this repo has, it costs money per query, it can hallucinate a number the rest of the app got right from a real feed, and it dilutes the thesis. The deterministic explainer *is* the analysis: "2.2σ for this stock over 3 sessions, 2.9× normal volume, and here's the headline that landed in the same window." It works offline, costs nothing, and can be defended line by line.
 - **Fundamentals (P/E, EPS, margins) and earnings dates.** Genuinely relevant — these drive most large single-day moves — but not available from a keyless feed any more. Documented as a next step rather than half-faked.
 
-### 5.5 State across sessions and devices
+### 5.5 Email: a capability, not a requirement
+
+Login codes are emailed when SMTP is configured and shown on screen when it isn't. That ordering is the decision, and it is deliberate in three directions:
+
+* **Anyone who clones this repo can sign in immediately** — no provider account, no API key, no domain to verify. The zero-config path is the working path.
+* **A deployment that has credentials sends real mail** (`SINCE_SMTP_HOST`, `SINCE_SMTP_USER`, … — see `backend/.env.example`). HTML + plain-text alternative, `X-Entity-Ref-ID` so mail clients surface the code in the notification, sent on a worker thread because `smtplib` blocks.
+* **A mail server that is down, throttled, or misconfigured degrades to the on-screen code** rather than locking every user out. An auth system whose only path to a session runs through a third party you don't control is a single point of failure with a support burden attached.
+
+The response says which mode it was — "Code sent to you@example.com" vs. "Couldn't reach the mail server, so here's your code directly" — instead of claiming an email is on its way when it isn't. `/api/health` reports the mode and the last SMTP error.
+
+Requesting a code is **rate limited to 6 per address per hour**. A login box accepts any address, including one that isn't yours; without a cap, the form is a free mailer pointed at a stranger.
+
+### 5.6 State across sessions and devices
 
 - **Server-side state, always.** Watchlists, baselines, levels, acknowledgements live in the database keyed by user. The client holds only a token (localStorage) and a visit id (sessionStorage). Sign in anywhere, same state.
-- **Passwordless auth** (email → 6-digit code → bearer token). The brief cares about identity across devices, not credential storage. Codes are single-use, hashed, expire in 10 minutes, and lock after 5 wrong attempts; tokens are 256-bit random and only their SHA-256 is stored. `send_code()` is the one-function seam for a real email provider; in dev the code is returned by the API.
+- **Passwordless auth** (email → 6-digit code → bearer token). The brief cares about identity across devices, not credential storage. Codes are single-use, hashed, expire in 10 minutes, lock after 5 wrong attempts, and are rate-limited per address; tokens are 256-bit random and only their SHA-256 is stored. Delivery is real SMTP when configured, on-screen otherwise — see §5.5.
 - **Sessions carry a device label** ("Chrome on Windows", "phone"), listed in the status strip. It makes the multi-device story visible rather than claimed.
 
-### 5.6 Concurrent edits (race conditions)
+### 5.7 Concurrent edits (race conditions)
 
 Two devices editing one watchlist is the concrete race the brief hints at. Every watchlist has a `version`. Writes may carry `If-Match: <version>`; the server bumps with a **conditional UPDATE** — `UPDATE watchlists SET version = version + 1 WHERE id = ? AND version = ?` — and checks the row count. Zero rows means someone else got there first: the client gets a **409 with the current state**, adopts it, tells the user, and lets them retry. No lost updates, no locks held across requests, identical on SQLite and Postgres.
 
 Adds and removes are idempotent, so a retried request after a network blip cannot double-add. Clients that omit `If-Match` get last-writer-wins, which is right for a single-device user.
 
-### 5.7 Stale, delayed and conflicting data
+### 5.8 Stale, delayed and conflicting data
 
 Every stored quote has two timestamps: `as_of` (the exchange time of the print) and `fetched_at` (when we received it). That distinction drives everything below.
 
@@ -263,13 +281,41 @@ Every stored quote has two timestamps: `as_of` (the exchange time of the print) 
 |Yahoo's `chartPreviousClose`|Is the close before the *chart range*, not yesterday's. Day change is derived from the daily rows instead — a wrong "prev close" makes every day-change figure wrong.|
 |Same symbol wanted by the refresh loop, a sample-list warmup and an "add symbol" at once|An in-flight set per fetch kind: one request goes out, the others skip.|
 
-### 5.8 Why these technologies
+### 5.9 Why these technologies
 
 - **FastAPI + SQLAlchemy + SQLite (WAL).** One process, one file, zero setup for a reviewer; `SINCE_DATABASE_URL=postgresql+psycopg://…` is the only change for Postgres (driver included). Requires Python 3.10+. SQLAlchemy 2.0 typed models keep the schema readable.
 - **React + Vite + TypeScript, no UI framework.** ~900 lines of components, hand-written CSS. A component library would have cost more in bundle size and fighting defaults than it saved.
 - **Yahoo Finance v8 chart endpoint.** Keyless, covers NSE/BSE, one endpoint for quotes and history (the v7 quote endpoint now needs a cookie+crumb dance that breaks unpredictably — one endpoint, one failure mode).
 - **Google News RSS.** Keyless, good Indian business-press coverage, gives publisher and timestamp.
 - **No Redis, no Celery, no websockets.** See §8.
+
+### 5.10 Analyst memory: a second clock
+
+The briefing's baseline is *the price you last saw*, and it advances on every visit. That is the right clock for attention. It is the wrong clock for conviction: the reason you bought something does not become stale because you opened an app.
+
+So analyst memory runs a second, slower clock over the same machinery. A thesis has an **anchor** — the price when you wrote it, or when you last reviewed it — and re-anchoring happens only on a review, so *"since you last thought about this"* stays literally true no matter how often you check the price.
+
+**When we are allowed to interrupt.** A prompt that fires too eagerly is worse than no prompt, because it trains you to dismiss without reading. Four triggers, surfaced one at a time, in order of how informative they are: a 52-week breach, then a move, then a burst of coverage, then the horizon you set yourself. At most one reason is ever shown — a prompt listing four reasons reads like an alert, and alerts get ignored.
+
+**The one place I deliberately break from the briefing's own model.** The move trigger does *not* use the volatility-normalised z-score alone, and finding that out was the most useful thing testing produced. Because z divides by √n, a stock that bleeds 26% over a quarter scores about 1.2σ — statistically unremarkable — and under a pure-z rule would never have prompted anyone. But "down a quarter of its value since you wrote this" is precisely when you most need to re-read why you were interested. Volatility-normalising is correct for **attention**, which is the briefing's job minute to minute; it is wrong for **conviction**, where what matters is the size of the outcome, not its statistical surprise. So a move triggers if it is rare (≥2σ) *or* material (≥20% with a weak 0.5σ floor, which exists only to exclude the pathological case of a stock for which 20% is a quiet fortnight). The asymmetry is deliberate: a prompt you dismiss costs one click; a thesis you never re-read costs the whole feature.
+
+**What it refuses to do.** It never judges your thesis. It has no opinion on whether you were right, offers no score, and makes no suggestion — it says *something happened that is worth re-reading this against*, shows you what you wrote and what the price did, and records your verdict. The verdict is always yours. "It broke" closes the thesis rather than leaving one you keep answering "no" to, and the closed ones are kept on purpose.
+
+**Demoing a three-month feature in two minutes.** A thesis is a quarterly instrument and no judge has a quarter. So the same "Try it" affordance the briefing uses appears here: move your anchor back 10/30/90 sessions onto a **real stored past close** — never a fabricated price — and the prompt then fires, or doesn't, entirely on its own merits.
+
+### 5.11 Fundamentals: an optional layer, deliberately
+
+Every other number in Since comes from an endpoint that is simply *there*. Fundamentals do not: Yahoo gates `quoteSummary` behind a cookie-and-crumb handshake that works from most ordinary networks, fails from many cloud hosts, and changes without notice. I originally cut the feature for that reason and was talked out of it — correctly. "Fragile" is an argument for isolating something, not for omitting it from a watchlist that people expect to show a P/E.
+
+So the whole layer is built to be amputatable:
+
+* **The circuit breaker never sees it.** `ResilientProvider.get_fundamentals` catches `ProviderError` and moves on. A vendor that serves prices perfectly but has revoked its fundamentals token is not a failing provider, and failing the chain over a missing P/E would be exactly backwards.
+* **Absence is stored, not guessed.** A symbol the vendor declined to answer for is stamped `source="none"` and retried on a slower clock, which distinguishes *we asked and were told nothing* from *we have not asked yet* — and stops a dead endpoint being hammered every tick. An all-empty response is never stored at all, because storing it would look like success.
+* **A missing field is a dash.** Yahoo signals "no value" with an empty object; coercing that to `0.0` would put a fabricated P/E on screen. `_raw()` refuses anything that is not actually a number, and `test_absent_fields_are_none_and_never_zero` pins it.
+* **Units are carried, not converted.** ROE arrives as a fraction and debt/equity as a percentage, in the same payload. Getting that wrong turns a 14% ROE into 1400%, so the parser tests assert on exact values.
+* **Refreshed daily, not per tick.** These figures move once a quarter; the endpoint serving them is the rate-limited one.
+
+What this still does not reach: promoter holding, FII/DII patterns, insider and bulk deals. Those are India-specific disclosures on NSE/BSE, and there is no honest keyless route to them — so they are absent rather than approximated.
 
 ## 6. Edge cases and failure modes
 
@@ -312,7 +358,7 @@ The rubric asks where to keep things simple. These were considered and cut on pu
 - **A message queue / Celery / Redis.** One asyncio loop with DB-backed state does the job for thousands of users; the migration path is documented above, not pre-built.
 - **Sentiment analysis on news.** No labelled data, unexplainable output, and a wrong "negative" tag is worse than no tag.
 - **Buy/sell ideas and an LLM chatbot.** Both were asked for; both were declined on purpose. See §5.4 — one is regulated advice, the other is an API key the reviewer doesn't have plus a hallucination risk on top of numbers the app otherwise gets right.
-- **Password auth, OAuth, email delivery.** The rubric is about state across devices; magic codes deliver that in 80 lines. The email seam is one function.
+- **Password auth and OAuth.** The rubric is about state across devices; magic codes deliver that in ~80 lines. Email delivery *is* implemented (§5.5) — but as an optional capability, not a hard dependency.
 - **Portfolio/P&L.** It's a watchlist. Holdings would double the data model for a feature the brief did not ask for.
 - **Per-user notification channels** (push, email digests). The *engine* for "what's worth telling you" is built; delivery is a product decision I'd validate before building.
 - **Reordering UI (drag-and-drop).** The API supports it (`PUT /items`), the UI doesn't yet — the attention ordering matters more than manual order for this product.
@@ -320,16 +366,22 @@ The rubric asks where to keep things simple. These were considered and cut on pu
 ## 9. Testing
 
 ```
-cd backend && python -m pytest -q      # 38 tests, ~6s, no network
+cd backend && python -m pytest -q      # 80 tests, ~15s, no network
+python scripts/make_test_report.py     # regenerates docs/TEST_REPORT.md from a real run
 ```
+
+**[`docs/TEST_REPORT.md`](docs/TEST_REPORT.md) is generated, not written.** It carries the full run, line coverage, and — the part worth reading — a table of *every number the interface displays* and where each one comes from. The short version: every displayed value is either a vendor field stored verbatim or arithmetic over stored values, there is no third category, and a missing input produces a missing output rather than a substituted one. Exactly three constants in the system are not observed from data (a σ fallback, a σ floor, and an assumed feed delay); all three are named in that document and disclosed in the interface where they apply.
 
 |File|Covers|
 |---|---|
 |`test_significance.py`|the scoring model: per-stock volatility, session scaling, levels both directions, 52w breach on a tiny move, session-adjusted volume, gap detection, short-history fallback, σ floor, reason ordering|
 |`test_market_infra.py`|NSE calendar (weekends, holidays, session counting), store conflict rules (monotonic time, primary wins), bar upsert idempotency, circuit breaker state machine, failover + degraded status, symbol-not-found does not trip the breaker or fall back|
+|`test_email.py`|unconfigured mailer falls back to the screen, configured one builds a correct multipart message, a broken mail server never locks anyone out, the code stops being echoed once delivery succeeds, per-address rate limiting|
+|`test_thesis.py`|analyst memory: quiet theses don't prompt, a rare move does, the *same* move on a wilder stock does not, a material move prompts even when it isn't statistically rare, the 52-week breach outranks the move reason, snooze silences soft triggers but not a breach, closed theses never prompt, the full lifecycle over HTTP, editing re-anchors, a dismissal is never recorded as an answer, demo rewind uses a real stored close, tenant isolation|
+|`test_yahoo_parsing.py`|the vendor payload parser against synthetic responses, for prices **and** fundamentals: units carried intact (ROE a fraction, debt/equity a percentage), an absent field parsed as None and never zero, string/boolean junk rejected rather than coerced, an all-empty answer not stored as a row, a rejected crumb cleared so the next cycle refetches, an HTML error page never mistaken for a crumb, and no-crumb degrading to "no fundamentals" rather than an exception; previous close derived from the daily rows and never from the five-session-stale `chartPreviousClose`, null holiday rows skipped, the vendor's declared delay carried through verbatim, a missing price dropped rather than defaulted, unknown tickers raising `SymbolNotFound` rather than tripping the breaker, malformed payloads erroring rather than silently reading zero|
 |`test_api.py`|auth (bad/reused codes, 401), two devices share state, 409 with current state + successful retry, idempotent add/remove, tenant isolation, baseline advances on new visit not refresh, idle timeout, acknowledge, rewind, level crossing in the briefing, news diffed against baseline, briefing survives provider outage, unknown tickers rejected and delisted ones flagged, old ticker names resolve, vendor-declared delay beats the "Live" label|
 
-The simulated provider makes every test deterministic and network-free. The Yahoo and Google News providers are exercised manually (`SINCE_PROVIDER=yahoo`).
+The simulated provider makes every test deterministic and network-free. The Yahoo provider's *network* paths are exercised manually (`SINCE_PROVIDER=yahoo`); its *parsing* — the only place in the codebase where a number can be wrong rather than merely missing — is covered exhaustively against synthetic payloads with known correct answers.
 
 ## 10. API
 
@@ -351,6 +403,11 @@ All under `/api`. Auth via `Authorization: Bearer <token>`. Full OpenAPI at `/do
 |GET|`/news?days=&scope=`|scope: `all` / `following` / `market`; each item tagged market / following / bigcap, flagged new vs. that symbol's baseline|
 |GET|`/compare?symbols=&sessions=`|rebased series, volatility, drawdown, correlation matrix|
 |GET|`/market`|indices, sector aggregates, movers, unusual moves, 52-week breaches|
+|GET/POST|`/thesis`|your reasons: the page groups them into *asking now* / open / closed, with your record|
+|GET/PATCH/DELETE|`/thesis/{id}`|read one with its full review history; editing the text re-anchors it to today|
+|POST|`/thesis/{id}/review`|`{verdict: holds\|weakened\|broken, note}` — records the answer and moves the anchor forward|
+|POST|`/thesis/{id}/snooze?days=`|"not now": defers soft triggers without recording an answer; a 52-week breach still gets through|
+|POST|`/thesis/{id}/demo/rewind?sessions=`|pretend you wrote it n sessions ago, anchored to a real stored close|
 |GET/POST/DELETE|`/levels[/{id}]`|price levels with direction + note|
 |GET|`/symbols/search?q=`|universe search|
 |GET|`/health`|market state, provider breakers, scheduler liveness|
